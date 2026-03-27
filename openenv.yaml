@@ -1,0 +1,35 @@
+name: customer_support_triage
+
+description: >
+  A reinforcement-learning style environment simulating customer support ticket triage.
+  Agents must resolve spam, handle urgency ordering, and follow VIP escalation workflows.
+
+tasks:
+
+  - id: easy_spam_filter
+    difficulty: easy
+    success_metric: resolve_all_spam
+
+  - id: medium_priority_handling
+    difficulty: medium
+    success_metric: resolve_high_urgency_first
+
+  - id: hard_vip_workflow
+    difficulty: hard
+    success_metric: escalate_then_close_vip
+
+action_space:
+  type: dict
+  fields:
+    ticket_id: int
+    action: [reply, close, escalate, mark_spam]
+
+observation_space:
+  type: dict
+  fields:
+    inbox: list
+    step_count: int
+
+reward:
+  type: dense
+  range: [-20, 20]
