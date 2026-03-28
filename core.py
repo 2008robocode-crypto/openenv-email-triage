@@ -46,6 +46,8 @@ class CustomerSupportEnv:
         if not unresolved:
             return None
         return max(unresolved, key=lambda x: x.urgency)
+    
+    
 
     def step(self, action_dict):
 
@@ -55,16 +57,23 @@ class CustomerSupportEnv:
 
         ticket = self.find_ticket(action_dict["ticket_id"])
 
+
+
         if ticket is None:
             return self.state(), -10, False, {"error": "invalid_ticket"}
 
         action = action_dict["action"]
 
         # ---------- HARD WORKFLOW CHECK ----------
+        # discourage idle / inefficient behavior
+        if action == "reply" and ticket.issue_type != "query":
+            reward -= 2
+
+
         if self.task_mode == "hard":
             if ticket.customer_type == "vip" and action == "close":
                 if ticket.id not in self.escalated_vip:
-                    reward -= 12  # BIG penalty
+                    reward -= 15  # BIG penalty
                     return self.state(), reward, False, {"error": "vip_not_escalated"}
 
         # ---------- BASE LOGIC ----------
@@ -87,7 +96,7 @@ class CustomerSupportEnv:
             ticket.resolved = True
 
         else:
-            reward -= 5
+            reward -= 7
 
         # ---------- EASY BONUS ----------
         if self.task_mode == "easy":

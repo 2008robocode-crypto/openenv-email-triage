@@ -14,16 +14,28 @@ pinned: false
 
 This project implements an OpenEnv-compatible reinforcement learning environment simulating real-world customer support ticket triage.
 
-## Environment Description
+## Motivation
 
-Agents must process incoming customer support tickets and choose actions such as:
+Modern customer support systems require agents to triage large volumes of incoming tickets under constraints such as urgency, customer priority, and workflow policies.
 
-- reply
-- close
-- escalate
-- mark_spam
+This environment simulates a realistic SaaS customer support pipeline where:
 
-The goal is to maximize cumulative reward by correctly prioritizing urgent issues, escalating VIP customers, and filtering spam.
+- VIP users require escalation workflows
+- High urgency issues must be prioritized
+- Spam must be filtered efficiently
+- Queries require conversational handling
+
+The goal is to provide a benchmark environment for evaluating decision-making agents in structured operational workflows.
+
+## Why This Matters
+
+This environment goes beyond simple classification tasks and introduces:
+
+- Sequential decision constraints
+- Workflow correctness requirements
+- Multi-objective reward balancing
+
+It is designed to test whether agents can follow real-world operational policies rather than just optimize isolated actions.
 
 ## Tasks
 
