@@ -1,2 +1,4 @@
 pydantic
 pyyaml
+fastapi
+uvicorn[standard]
