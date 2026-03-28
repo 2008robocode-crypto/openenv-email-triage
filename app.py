@@ -1,11 +1,14 @@
-import time
-import subprocess
+from fastapi import FastAPI
+from grader import evaluate
+from baseline_agent import baseline_policy
 
-print("Starting evaluation...")
+app = FastAPI()
 
-subprocess.run(["python", "run_eval.py"])
+@app.get("/")
+def home():
+    return {"status": "running"}
 
-print("Evaluation finished. Keeping container alive.")
-
-while True:
-    time.sleep(60)
+@app.get("/baseline")
+def run_baseline():
+    result = evaluate(baseline_policy)
+    return result
