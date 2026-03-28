@@ -10,5 +10,8 @@ def home():
 
 @app.get("/baseline")
 def run_baseline():
-    result = evaluate(baseline_policy)
-    return result
+    try:
+        result = evaluate(baseline_policy)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
