@@ -1,7 +1,9 @@
-from fastapi import FastAPI
+import gradio as gr
 
-app = FastAPI()
-
-@app.get("/")
 def home():
-    return {"status": "running"}
+    return "OpenEnv Email Triage Environment is Running ✅"
+
+iface = gr.Interface(fn=home, inputs=[], outputs="text")
+
+if __name__ == "__main__":
+    iface.launch()
