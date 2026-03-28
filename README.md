@@ -62,11 +62,34 @@ Dictionary:
 
 ## Reward Function
 
-Dense reward structure:
-- +7 spam correctly filtered
-- +9 VIP escalation
-- +4 correct closure
-- negative reward for incorrect action
+Reward Design:
+
+The environment uses a dense reward structure to guide agent behavior:
+
+Base Rewards:
++8  Correct spam classification (mark_spam)
++10 Correct escalation of high-urgency tickets
++5  Correct ticket closure
++3  Reply action (used for query handling)
+
+Penalties:
+-7   Incorrect or invalid actions
+-10  Invalid ticket selection
+-2   Replying to non-query tickets
+-15  Violating VIP workflow (closing without escalation)
+
+Task-Specific Bonuses:
+Easy:
++5 additional reward for correctly handling spam
+
+Medium:
++6 for resolving highest urgency ticket first
+-3 for incorrect prioritization
+
+Hard:
++8 for correctly completing VIP escalation → closure workflow
+
+The reward function provides both immediate and delayed feedback, encouraging agents to follow structured workflows rather than greedy actions.
 
 ## Setup
 

@@ -5,9 +5,7 @@ class Ticket(BaseModel):
     id: int
     subject: str
     message: str
-
-    issue_type: str        # refund / complaint / query / spam
-    urgency: int           # 1 to 5
-    customer_type: str     # normal / vip
-
+    issue_type: str
+    urgency: int
+    customer_type: str
     resolved: bool = False

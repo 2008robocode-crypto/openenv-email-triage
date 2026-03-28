@@ -3,7 +3,7 @@ from models import Ticket
 
 class CustomerSupportEnv:
 
-    def __init__(self, task_mode="easy"):
+    def __init__(self, task_mode="hard"):
         self.task_mode = task_mode
         self.reset()
 
@@ -23,9 +23,11 @@ class CustomerSupportEnv:
                    issue_type="query", urgency=2, customer_type="normal"),
         ]
 
+        # Track VIP escalation
         self.escalated_vip = set()
 
         self.step_count = 0
+        self.max_steps = 20   # ✅ safety cap
         return self.state()
 
     def state(self):
@@ -46,8 +48,6 @@ class CustomerSupportEnv:
         if not unresolved:
             return None
         return max(unresolved, key=lambda x: x.urgency)
-    
-    
 
     def step(self, action_dict):
 
@@ -57,26 +57,18 @@ class CustomerSupportEnv:
 
         ticket = self.find_ticket(action_dict["ticket_id"])
 
-
-
         if ticket is None:
             return self.state(), -10, False, {"error": "invalid_ticket"}
 
         action = action_dict["action"]
 
-        # ---------- HARD WORKFLOW CHECK ----------
-        # discourage idle / inefficient behavior
-        if action == "reply" and ticket.issue_type != "query":
-            reward -= 2
-
-
+        # ---------- HARD CONSTRAINT ----------
         if self.task_mode == "hard":
             if ticket.customer_type == "vip" and action == "close":
                 if ticket.id not in self.escalated_vip:
-                    reward -= 15  # BIG penalty
-                    return self.state(), reward, False, {"error": "vip_not_escalated"}
+                    return self.state(), -15, False, {"error": "vip_not_escalated"}
 
-        # ---------- BASE LOGIC ----------
+        # ---------- BASE ACTION LOGIC ----------
 
         if action == "mark_spam" and ticket.issue_type == "spam":
             reward += 8
@@ -86,10 +78,14 @@ class CustomerSupportEnv:
             reward += 10
             if ticket.customer_type == "vip":
                 self.escalated_vip.add(ticket.id)
-            ticket.resolved = True
+            # NOTE: do NOT resolve here → forces agent to close later
 
         elif action == "reply":
             reward += 3
+            if ticket.issue_type == "query":
+                ticket.resolved = True  # ✅ FIX: resolve query after reply
+            else:
+                reward -= 2
 
         elif action == "close":
             reward += 5
@@ -106,7 +102,7 @@ class CustomerSupportEnv:
         # ---------- MEDIUM BONUS ----------
         if self.task_mode == "medium":
             highest = self.highest_urgency_unresolved()
-            if highest is not None:
+            if highest:
                 if ticket.id == highest.id and ticket.resolved:
                     reward += 6
                 else:
@@ -120,7 +116,12 @@ class CustomerSupportEnv:
 
         self.step_count += 1
 
+        # Episode ends when all resolved
         if all(t.resolved for t in self.inbox):
+            done = True
+
+        # ✅ SAFETY TERMINATION
+        if self.step_count >= self.max_steps:
             done = True
 
         return self.state(), reward, done, info
