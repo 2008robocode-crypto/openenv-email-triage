@@ -11,11 +11,11 @@ env = CustomerSupportEnv()
 def root():
     return {"status": "running"}
 
-@app.get("/reset")
+@app.get("/reset/")
 def reset():
     return env.reset()
 
-@app.post("/step")
+@app.post("/step/")
 def step(action: dict):
     return env.step(action)
 
@@ -23,11 +23,11 @@ def step(action: dict):
 def state():
     return env.state()
 
-@app.get("/baseline")
+@app.get("/baseline/")
 def baseline():
     return evaluate(baseline_policy)
 
-@app.get("/tasks")
+@app.get("/tasks/")
 def tasks():
     return {
     "tasks": [
@@ -37,6 +37,6 @@ def tasks():
     ]
 }
 
-@app.get("/grader")
+@app.get("/grader/")
 def grader():
     return {"info": "Use baseline endpoint for score"}
