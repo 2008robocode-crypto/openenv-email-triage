@@ -18,6 +18,12 @@ def state():
     env = CustomerSupportEnv()
     return env.state()
 
+@app.post("/step")
+def step(action: dict):
+    from core import CustomerSupportEnv
+    env = CustomerSupportEnv()
+    return env.step(action)
+
 @app.get("/baseline")
 def baseline():
     from grader import evaluate
@@ -37,9 +43,3 @@ def tasks():
 @app.get("/grader")
 def grader():
     return {"info": "use /baseline"}
-
-@app.post("/step")
-def step(action: dict):
-    from core import CustomerSupportEnv
-    env = CustomerSupportEnv()
-    return env.step(action)

@@ -1,46 +1,42 @@
----
-title: OpenEnv Email Triage
-emoji: 📧
-colorFrom: blue
-colorTo: green
-sdk: docker
-pinned: false
----
-
-
-
 name: customer_support_triage
 
 description: >
-  A reinforcement-learning style environment simulating customer support ticket triage.
-  Agents must resolve spam, handle urgency ordering, and follow VIP escalation workflows.
+  A reinforcement-learning environment simulating customer support ticket triage.
+  Agents must filter spam, prioritize urgent tickets, and correctly handle VIP escalation workflows.
+
+version: 1.0
+
+entry_point: core:CustomerSupportEnv
 
 tasks:
+  - name: easy
+    description: Resolve spam tickets correctly
 
-  - id: easy_spam_filter
-    difficulty: easy
-    success_metric: resolve_all_spam
+  - name: medium
+    description: Prioritize and resolve high urgency tickets first
 
-  - id: medium_priority_handling
-    difficulty: medium
-    success_metric: resolve_high_urgency_first
-
-  - id: hard_vip_workflow
-    difficulty: hard
-    success_metric: escalate_then_close_vip
+  - name: hard
+    description: Escalate VIP tickets before closing
 
 action_space:
-  type: dict
-  fields:
-    ticket_id: int
-    action: [reply, close, escalate, mark_spam]
+  type: object
+  properties:
+    ticket_id:
+      type: integer
+    action:
+      type: string
+      enum: ["reply", "close", "escalate", "mark_spam"]
 
 observation_space:
-  type: dict
-  fields:
-    inbox: list
-    step_count: int
+  type: object
+  properties:
+    inbox:
+      type: array
+    step_count:
+      type: integer
+    task_mode:
+      type: string
 
-reward:
-  type: dense
-  range: [-20, 20]
+reward_range: [-20, 20]
+
+max_steps: 20

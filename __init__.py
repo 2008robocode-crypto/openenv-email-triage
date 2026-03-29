@@ -1,1 +1,0 @@
-self.task_mode = "easy"

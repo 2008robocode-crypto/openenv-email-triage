@@ -7,9 +7,9 @@ MODEL_NAME = os.getenv("MODEL_NAME")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 def run():
-    print("Running baseline inference...")
     result = evaluate(baseline_policy)
-    print("Result:", result)
+    print("Evaluation Result")
+    print(result)
 
 if __name__ == "__main__":
     run()

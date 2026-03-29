@@ -1,6 +1,5 @@
 from models import Ticket
 
-
 class CustomerSupportEnv:
 
     def __init__(self, task_mode="hard"):
@@ -8,7 +7,6 @@ class CustomerSupportEnv:
         self.reset()
 
     def reset(self):
-
         self.inbox = [
             Ticket(id=1, subject="Refund not received", message="I want money back",
                    issue_type="refund", urgency=4, customer_type="normal"),
@@ -23,52 +21,40 @@ class CustomerSupportEnv:
                    issue_type="query", urgency=2, customer_type="normal"),
         ]
 
-        # Track VIP escalation
         self.escalated_vip = set()
-
         self.step_count = 0
-        self.max_steps = 20   # ✅ safety cap
         return self.state()
 
     def state(self):
         return {
-            "inbox": self.inbox,
+            "inbox": [t.dict() for t in self.inbox],
             "step_count": self.step_count,
             "task_mode": self.task_mode
         }
 
     def find_ticket(self, ticket_id):
-        for t in self.inbox:
-            if t.id == ticket_id:
-                return t
-        return None
+        return next((t for t in self.inbox if t.id == ticket_id), None)
 
     def highest_urgency_unresolved(self):
         unresolved = [t for t in self.inbox if not t.resolved]
-        if not unresolved:
-            return None
-        return max(unresolved, key=lambda x: x.urgency)
+        return max(unresolved, key=lambda x: x.urgency) if unresolved else None
 
     def step(self, action_dict):
-
         reward = -1
         done = False
         info = {}
 
         ticket = self.find_ticket(action_dict["ticket_id"])
-
         if ticket is None:
             return self.state(), -10, False, {"error": "invalid_ticket"}
 
         action = action_dict["action"]
 
-        # ---------- HARD CONSTRAINT ----------
+        # HARD constraint
         if self.task_mode == "hard":
             if ticket.customer_type == "vip" and action == "close":
                 if ticket.id not in self.escalated_vip:
                     return self.state(), -15, False, {"error": "vip_not_escalated"}
-
-        # ---------- BASE ACTION LOGIC ----------
 
         if action == "mark_spam" and ticket.issue_type == "spam":
             reward += 8
@@ -78,13 +64,10 @@ class CustomerSupportEnv:
             reward += 10
             if ticket.customer_type == "vip":
                 self.escalated_vip.add(ticket.id)
-            # NOTE: do NOT resolve here → forces agent to close later
 
         elif action == "reply":
             reward += 3
-            if ticket.issue_type == "query":
-                ticket.resolved = True  # ✅ FIX: resolve query after reply
-            else:
+            if ticket.issue_type != "query":
                 reward -= 2
 
         elif action == "close":
@@ -94,21 +77,16 @@ class CustomerSupportEnv:
         else:
             reward -= 7
 
-        # ---------- EASY BONUS ----------
+        # bonuses
         if self.task_mode == "easy":
             if ticket.issue_type == "spam" and ticket.resolved:
                 reward += 5
 
-        # ---------- MEDIUM BONUS ----------
         if self.task_mode == "medium":
             highest = self.highest_urgency_unresolved()
-            if highest:
-                if ticket.id == highest.id and ticket.resolved:
-                    reward += 6
-                else:
-                    reward -= 3
+            if highest and ticket.id == highest.id and ticket.resolved:
+                reward += 6
 
-        # ---------- HARD BONUS ----------
         if self.task_mode == "hard":
             if ticket.customer_type == "vip" and ticket.resolved:
                 if ticket.id in self.escalated_vip:
@@ -116,12 +94,6 @@ class CustomerSupportEnv:
 
         self.step_count += 1
 
-        # Episode ends when all resolved
-        if all(t.resolved for t in self.inbox):
-            done = True
-
-        # ✅ SAFETY TERMINATION
-        if self.step_count >= self.max_steps:
-            done = True
+        done = all(t.resolved for t in self.inbox) or self.step_count > 20
 
         return self.state(), reward, done, info

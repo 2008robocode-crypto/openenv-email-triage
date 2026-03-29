@@ -1,46 +1,31 @@
 from core import CustomerSupportEnv
 
-
-def run_episode(policy_fn, task_mode="hard"):
-
-    env = CustomerSupportEnv(task_mode=task_mode)
-
+def run_episode(policy_fn):
+    env = CustomerSupportEnv()
     state = env.reset()
-
     total_reward = 0
-    done = False
 
-    while not done:
-
+    for _ in range(20):
         action = policy_fn(state)
-
-        state, reward, done, info = env.step(action)
-
+        state, reward, done, _ = env.step(action)
         total_reward += reward
+        if done:
+            break
 
     return total_reward
 
 
-def normalize_score(total_reward):
-
-    # simple heuristic scaling
-    min_r = -50
-    max_r = 80
-
-    score = (total_reward - min_r) / (max_r - min_r)
-
-    score = max(0.0, min(1.0, score))
-
-    return score
-
-
 def evaluate(policy_fn):
+    total = 0
+    episodes = 5
 
-    reward = run_episode(policy_fn)
+    for _ in range(episodes):
+        total += run_episode(policy_fn)
 
-    score = normalize_score(reward)
+    avg_reward = total / episodes
+    score = max(0.0, min(1.0, avg_reward / 50))
 
     return {
-        "total_reward": reward,
+        "total_reward": total,
         "score": score
     }
