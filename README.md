@@ -3,7 +3,7 @@ title: openenv-email-triage
 emoji: 🤖
 colorFrom: blue
 colorTo: green
-sdk: gradio
+sdk: docker
 app_file: app.py
 pinned: false
 ---
