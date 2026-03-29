@@ -2,7 +2,7 @@
 title: openenv-email-triage-v1
 emoji: 🧑‍💻
 colorFrom: red
-colorTo: black
+colorTo: yellow
 sdk: docker
 app_file: app.py
 pinned: false
