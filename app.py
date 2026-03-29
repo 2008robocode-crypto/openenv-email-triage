@@ -4,7 +4,7 @@ app = FastAPI()
 
 @app.get("/")
 def root():
-    return {"status": "running"}
+    return {"status": "running", "service": "openenv-email-triage-v1"}
 
 @app.get("/reset")
 def reset():
