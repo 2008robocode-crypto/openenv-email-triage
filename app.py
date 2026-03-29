@@ -6,9 +6,9 @@ app = FastAPI()
 def root():
     return "ok"
 
-@app.get("/")
-def root():
-    return "ok"
+@app.head("/")
+def root_head():
+    return {}
 
 @app.get("/health")
 def health():
