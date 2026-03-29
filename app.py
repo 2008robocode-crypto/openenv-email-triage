@@ -29,7 +29,13 @@ def baseline():
 
 @app.get("/tasks")
 def tasks():
-    return ["easy", "medium", "hard"]
+    return {
+    "tasks": [
+        {"name": "easy", "description": "Handle spam emails"},
+        {"name": "medium", "description": "Prioritize urgent tickets"},
+        {"name": "hard", "description": "Handle VIP workflow correctly"}
+    ]
+}
 
 @app.get("/grader")
 def grader():
