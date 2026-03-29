@@ -1,8 +1,10 @@
 import os
+import json
 from openai import OpenAI
 
 from core import CustomerSupportEnv
 
+# REQUIRED ENV VARIABLES
 API_BASE_URL = os.getenv("API_BASE_URL")
 MODEL_NAME = os.getenv("MODEL_NAME")
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -12,35 +14,37 @@ client = OpenAI(
     api_key=HF_TOKEN,
 )
 
+MAX_STEPS = 20
+TEMPERATURE = 0.2
+MAX_TOKENS = 150
+
 
 def llm_policy(state):
     prompt = f"""
-    You are an agent solving email triage.
+You are an AI agent solving a customer support triage task.
 
-    State:
-    {state}
+State:
+{state}
 
-    Choose action as JSON:
-    {{
-        "ticket_id": int,
-        "action": "reply" | "close" | "escalate" | "mark_spam"
-    }}
-    """
+Choose the best action in JSON format:
+{{
+    "ticket_id": int,
+    "action": "reply" | "close" | "escalate" | "mark_spam"
+}}
+"""
 
     response = client.chat.completions.create(
         model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=100,
+        temperature=TEMPERATURE,
+        max_tokens=MAX_TOKENS,
     )
 
-    text = response.choices[0].message.content
+    text = response.choices[0].message.content.strip()
 
     try:
-        import json
         return json.loads(text)
     except:
-        # fallback safe action
         return {"ticket_id": 1, "action": "reply"}
 
 
@@ -50,10 +54,11 @@ def run():
 
     total_reward = 0
 
-    for _ in range(20):
+    for _ in range(MAX_STEPS):
         action = llm_policy(state)
         state, reward, done, _ = env.step(action)
         total_reward += reward
+
         if done:
             break
 
