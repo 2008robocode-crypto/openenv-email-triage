@@ -5,7 +5,7 @@ app = FastAPI()
 @app.get("/")
 def root():
     return {
-        "status": "running"
+        "status": "ok"
     }
 
 @app.get("/reset")
@@ -49,3 +49,7 @@ def grader():
 @app.get("/health")
 def health():
     return {"ok": True}
+
+@app.get("/favicon.ico") # to remove noice from logs
+def favicon():
+    return {}
