@@ -1,5 +1,5 @@
 ---
-title: openenv-email-triage
+title: openenv-email-triage-v1
 emoji: 🤖
 colorFrom: blue
 colorTo: green
