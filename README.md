@@ -1,8 +1,8 @@
 ---
 title: openenv-email-triage-v1
-emoji: 🤖
-colorFrom: blue
-colorTo: green
+emoji: 🧑‍💻
+colorFrom: red
+colorTo: black
 sdk: docker
 app_file: app.py
 pinned: false
@@ -13,6 +13,7 @@ pinned: false
 # Customer Support Email Triage Environment
 
 This project implements an OpenEnv-compatible reinforcement learning environment simulating real-world customer support ticket triage.
+Includes API-first design for automated evaluation and extensibility.
 
 ## Motivation
 
