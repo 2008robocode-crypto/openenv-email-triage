@@ -27,10 +27,19 @@ def state():
     return env.state()
 
 @app.post("/step")
-def step(action: dict):
+async def step(request: Request):
     from core import CustomerSupportEnv
+
+    action = await request.json()   # <-- IMPORTANT FIX
     env = CustomerSupportEnv()
-    return env.step(action)
+    state, reward, done, info = env.step(action)
+
+    return {
+        "state": state,
+        "reward": reward,
+        "done": done,
+        "info": info
+    }
 
 @app.get("/baseline")
 def baseline():
