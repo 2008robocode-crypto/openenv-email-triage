@@ -1,5 +1,5 @@
-from fastapi import FastAPI
-from fastapi import Request
+
+from fastapi import FastAPI, Request
 
 app = FastAPI()
 
@@ -31,8 +31,9 @@ def state():
 async def step(request: Request):
     from core import CustomerSupportEnv
 
-    action = await request.json()   # <-- IMPORTANT FIX
+    action = await request.json()
     env = CustomerSupportEnv()
+
     state, reward, done, info = env.step(action)
 
     return {
