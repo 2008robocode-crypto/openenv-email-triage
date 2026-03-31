@@ -1,4 +1,4 @@
-name: customer_support_triage-v1
+name: customer_support_triage
 
 description: >
   A reinforcement-learning environment simulating customer support ticket triage.
