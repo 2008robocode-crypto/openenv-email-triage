@@ -16,7 +16,13 @@ def health():
     return {"ok": True}
 
 @app.get("/reset")
-def reset():
+def reset_get():
+    from core import CustomerSupportEnv
+    env = CustomerSupportEnv()
+    return env.reset()
+
+@app.post("/reset")
+def reset_post():
     from core import CustomerSupportEnv
     env = CustomerSupportEnv()
     return env.reset()
