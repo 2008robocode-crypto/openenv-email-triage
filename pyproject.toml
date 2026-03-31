@@ -6,7 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "openenv-email-triage"
 version = "0.1.0"
 description = "OpenEnv Customer Support Email Triage Environment"
-authors = [{ name = "Purav" }]
+authors = [
+    { name = "Purav" }
+]
 dependencies = [
     "fastapi",
     "uvicorn",
@@ -16,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-server = "server.app:main"s
+server = "server.app:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
