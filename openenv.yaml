@@ -1,0 +1,37 @@
+name: customer_support_triage
+
+description: >
+  A reinforcement-learning environment simulating customer support ticket triage.
+  Agents must filter spam, prioritize urgent tickets, and correctly handle VIP escalation workflows.
+
+version: 1.0
+
+entry_point: core:CustomerSupportEnv
+
+tasks:
+  - easy_spam_filter
+  - medium_priority_handling
+  - hard_vip_workflow
+
+action_space:
+  type: object
+  properties:
+    ticket_id:
+      type: integer
+    action:
+      type: string
+      enum: ["reply", "close", "escalate", "mark_spam"]
+
+observation_space:
+  type: object
+  properties:
+    inbox:
+      type: array
+    step_count:
+      type: integer
+    task_mode:
+      type: string
+
+reward_range: [-20, 20]
+
+max_steps: 20
