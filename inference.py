@@ -46,7 +46,7 @@ def run():
             # Fixed typo: fallback_policy
             action = safe_parse(text) or fallback_policy(state) 
             
-            state, reward, done = env.step(action)
+            state, reward, done, info = env.step(action)
             total_reward += reward
             steps += 1
             print(f"[STEP] step={step} reward={float(reward):.4f}", flush=True)
