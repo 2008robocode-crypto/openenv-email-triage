@@ -2,96 +2,142 @@ import os
 import sys
 import json
 import re
-import traceback
 from openai import OpenAI
 from core import CustomerSupportEnv
 
-MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
+# ===== CONFIG =====
+MAX_STEPS = 20
 
+# ===== STRICT ENV (DO NOT CHANGE) =====
+API_BASE_URL = os.environ["API_BASE_URL"]
+API_KEY = os.environ["API_KEY"]
+MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o-mini")
+
+
+# ===== SAFE JSON PARSER =====
 def safe_parse(text):
-    if not text: return None
+    if not text:
+        return None
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         try:
-            content = match.group().replace("'", '"')
-            return json.loads(content)
+            return json.loads(match.group())
         except:
             pass
     return None
 
-def run():
-    try:
-        env = CustomerSupportEnv()
-        state = env.reset()
-        print("[START] task=customer_support_triage", flush=True)
 
-        api_key = os.environ["API_KEY"]
-        base_url = os.environ["API_BASE_URL"]
-        model_name = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+# ===== FALLBACK POLICY =====
+def fallback_policy(state):
+    for t in state.get("inbox", []):
+        if not t.get("resolved") and t.get("issue_type") == "spam":
+            return {"ticket_id": t["id"], "action": "mark_spam"}
 
-        # FIX 1: Ensure base_url ends with /v1 (LiteLLM proxy requirement)
-        if not base_url.rstrip("/").endswith("/v1"):
-            base_url = base_url.rstrip("/") + "/v1"
+    for t in state.get("inbox", []):
+        if not t.get("resolved") and t.get("customer_type") == "vip":
+            return {"ticket_id": t["id"], "action": "escalate"}
 
-        print(f"[CONFIG] base_url={base_url} model={model_name}", flush=True)
+    for t in state.get("inbox", []):
+        if not t.get("resolved"):
+            return {"ticket_id": t["id"], "action": "close"}
 
-        client = OpenAI(
-            base_url=base_url,
-            api_key=api_key,
-        )
+    return {"ticket_id": 1, "action": "reply"}
 
-        total_reward, steps = 0, 0
-        for step in range(1, MAX_STEPS + 1):
-            prompt = f"""State:
+
+# ===== LLM CALL =====
+def call_llm(client, state):
+    prompt = f"""You are an AI agent solving a customer support email triage task.
+
+State:
 {json.dumps(state)}
 
 Return ONLY valid JSON:
 {{
     "ticket_id": int,
     "action": "reply" | "close" | "escalate" | "mark_spam"
-}}"""
+}}
+"""
 
-            # FIX 2: Don't silently swallow errors — log them loudly
-            action = None
-            try:
-                res = client.chat.completions.create(
-                    model=model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=100,
-                    temperature=0
-                )
-                text = res.choices[0].message.content.strip()
-                print(f"[LLM] step={step} response={text[:80]}", flush=True)
-                action = safe_parse(text)
-            except Exception as e:
-                # FIX 3: Print full error so you can see what's going wrong
-                print(f"[LLM_ERROR] step={step} error={type(e).__name__}: {e}", flush=True)
-                traceback.print_exc(file=sys.stdout)  # stdout so validator sees it
-                action = None
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=100,
+        )
+
+        text = response.choices[0].message.content if response.choices else None
+        return safe_parse(text)
+
+    except Exception as e:
+        print(f"[DEBUG] LLM error: {e}", flush=True)
+        return None
+
+
+# ===== MAIN RUN =====
+def run():
+    env = CustomerSupportEnv()
+    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+
+    state = env.reset()
+
+    rewards = []
+    steps = 0
+
+    # ✅ START LOG (STRICT FORMAT)
+    print(
+        f"[START] task=customer_support_triage env=openenv model={MODEL_NAME}",
+        flush=True,
+    )
+
+    try:
+        for step in range(1, MAX_STEPS + 1):
+
+            action = call_llm(client, state)
 
             if not action:
-                inbox = state.get("inbox", [])
-                tid = inbox[0]["id"] if inbox else 1
-                action = {"ticket_id": tid, "action": "reply"}
-                print(f"[FALLBACK] step={step} using fallback action", flush=True)
+                action = fallback_policy(state)
 
-            step_result = env.step(action)
-            state, reward, done = step_result[0], step_result[1], step_result[2]
+            try:
+                state, reward, done, info = env.step(action)
+                error = None
+            except Exception as e:
+                reward = 0.0
+                done = False
+                error = str(e)
 
-            total_reward += reward
-            steps += 1
-            print(f"[STEP] step={step} reward={float(reward):.4f}", flush=True)
+            rewards.append(float(reward))
+            steps = step
+
+            # ✅ STEP LOG (STRICT FORMAT)
+            print(
+                f"[STEP] step={step} action={action} reward={reward:.2f} "
+                f"done={str(done).lower()} error={error if error else 'null'}",
+                flush=True,
+            )
+
             if done:
                 break
 
-        final_score = max(MIN_VAL, min(MAX_VAL, float(total_reward / 50)))
-        print(f"[END] success=True steps={steps} rewards={final_score:.4f}", flush=True)
-        print(f"[TOTAL_SUMMARY] task=customer_support_triage score={final_score:.4f}", flush=True)
+        # ✅ SCORE CALC
+        total_reward = sum(rewards)
+        score = max(0.0, min(1.0, total_reward / 50))
+        success = score > 0
 
     except Exception as e:
-        print(f"FATAL ERROR: {e}", flush=True)
-        traceback.print_exc(file=sys.stdout)
-        sys.exit(0)
+        print(f"[FATAL] {e}", flush=True)
+        success = False
+        score = 0.0
+
+    # ✅ END LOG (STRICT FORMAT)
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+
+    print(
+        f"[END] success={str(success).lower()} steps={steps} "
+        f"score={score:.2f} rewards={rewards_str}",
+        flush=True,
+    )
+
 
 if __name__ == "__main__":
     run()
