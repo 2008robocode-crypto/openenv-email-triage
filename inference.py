@@ -5,10 +5,15 @@ from openai import OpenAI
 from core import CustomerSupportEnv
 
 MAX_STEPS = 20
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct") 
 
+# ✅ STRICT: NO FALLBACKS
+API_BASE_URL = os.environ["API_BASE_URL"]
+API_KEY = os.environ["API_KEY"]
+
+MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+
+
+# ===== SAFE JSON PARSER =====
 def safe_parse(text):
     try:
         return json.loads(text)
@@ -21,6 +26,8 @@ def safe_parse(text):
                 pass
     return None
 
+
+# ===== FALLBACK POLICY =====
 def fallback_policy(state):
     for t in state["inbox"]:
         if not t["resolved"] and t["issue_type"] == "spam":
@@ -37,29 +44,33 @@ def fallback_policy(state):
     return {"ticket_id": 1, "action": "reply"}
 
 
-def call_llm(prompt):
-    client = OpenAI(
-        base_url=API_BASE_URL,
-        api_key=API_KEY,
-    )
+# ===== SINGLE GLOBAL CLIENT (IMPORTANT) =====
+client = OpenAI(
+    base_url=API_BASE_URL,
+    api_key=API_KEY,
+)
 
+
+# ===== LLM CALL =====
+def call_llm(prompt):
     print("[DEBUG] Calling LLM...", flush=True)
 
-    response = client.responses.create(
+    response = client.chat.completions.create(
         model=MODEL_NAME,
-        input=prompt,
-        max_output_tokens=50,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        max_tokens=50,
     )
 
     print("[DEBUG] LLM response received", flush=True)
 
     try:
-        text = response.output[0].content[0].text
-        return text
+        return response.choices[0].message.content.strip()
     except:
         return None
 
 
+# ===== POLICY =====
 def llm_policy(state):
     try:
         prompt = f"""
@@ -92,6 +103,7 @@ Return ONLY valid JSON:
         return fallback_policy(state)
 
 
+# ===== MAIN =====
 def run():
     env = CustomerSupportEnv()
     state = env.reset()
@@ -101,10 +113,9 @@ def run():
     total_reward = 0
     steps = 0
 
-    
+    # ✅ FORCE at least 1 API call (VERY IMPORTANT)
     try:
-        call_llm("ping")
-        print("[DEBUG] Warmup success", flush=True)
+        call_llm("Say hello")
     except Exception as e:
         print(f"[DEBUG] Warmup failed: {e}", flush=True)
 
@@ -123,7 +134,10 @@ def run():
 
     score = max(0.0, min(1.0, total_reward / 50))
 
-    print(f"[END] task=customer_support_triage score={score} steps={steps}", flush=True)
+    print(
+        f"[END] task=customer_support_triage score={score} steps={steps}",
+        flush=True
+    )
 
 
 if __name__ == "__main__":
