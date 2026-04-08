@@ -6,17 +6,54 @@ import traceback
 from openai import OpenAI
 from core import CustomerSupportEnv
 
-# STRICT (NO FALLBACKS — REQUIRED)
-API_BASE_URL = os.environ["API_BASE_URL"]
-API_KEY = os.environ["API_KEY"]
+# =========================
+# ENV (dual mode safe)
+# =========================
+API_BASE_URL = os.environ.get("API_BASE_URL")
+API_KEY = os.environ.get("API_KEY")
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
 
+# =========================
+# HF SPACE MODE (no validator env)
+# =========================
+if not API_BASE_URL or not API_KEY:
+    import uvicorn
+    from fastapi import FastAPI, Request
+
+    app = FastAPI()
+    env = CustomerSupportEnv()
+
+    @app.get("/")
+    def root():
+        return {"status": "running"}
+
+    @app.post("/reset")
+    def reset():
+        global env
+        env = CustomerSupportEnv()
+        return env.reset()
+
+    @app.post("/step")
+    async def step(request: Request):
+        global env
+        action = await request.json()
+        state, reward, done, info = env.step(action)
+        return {"state": state, "reward": reward, "done": done, "info": info}
+
+    if __name__ == "__main__":
+        uvicorn.run(app, host="0.0.0.0", port=7860)
+
+    sys.exit(0)
+
+
+# =========================
+# LOGGING (STRICT FORMAT)
+# =========================
 def log_start(task, env_name, model):
     print(f"[START] task={task} env={env_name} model={model}", flush=True)
-
 
 def log_step(step, action_str, reward, done, error=None):
     print(
@@ -25,7 +62,6 @@ def log_step(step, action_str, reward, done, error=None):
         f"error={error if error else 'null'}",
         flush=True
     )
-
 
 def log_end(success, steps, score, rewards):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
@@ -36,15 +72,24 @@ def log_end(success, steps, score, rewards):
     )
 
 
+# =========================
+# PARSER
+# =========================
 def safe_parse(text):
     if not text:
         return None
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
-        return json.loads(match.group())
+        try:
+            return json.loads(match.group())
+        except:
+            pass
     return None
 
 
+# =========================
+# FALLBACK POLICY
+# =========================
 def fallback_policy(state):
     inbox = state.get("inbox", [])
     for t in inbox:
@@ -56,6 +101,9 @@ def fallback_policy(state):
     return {"ticket_id": 1, "action": "close"}
 
 
+# =========================
+# MAIN
+# =========================
 def run():
     success = False
     steps_taken = 0
@@ -72,7 +120,7 @@ def run():
             api_key=API_KEY
         )
 
-        # 🔥 CRITICAL: HARD API CALL (NO TRY/EXCEPT)
+        # 🔥 FORCE API CALL (NO TRY/EXCEPT)
         client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": "Say OK"}],
@@ -93,7 +141,6 @@ Return ONLY JSON:
 {{"ticket_id": int, "action": "reply|close|escalate|mark_spam"}}
 """
 
-            # 🚨 NO SILENT FAIL
             res = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=[{"role": "user", "content": prompt}],
@@ -103,12 +150,9 @@ Return ONLY JSON:
 
             text = res.choices[0].message.content.strip()
 
-            try:
-                action = safe_parse(text)
-            except:
-                action = None
-
+            action = safe_parse(text)
             error = None
+
             if not action:
                 action = fallback_policy(state)
                 error = "parse_failed"
@@ -126,7 +170,6 @@ Return ONLY JSON:
         success = score > 0.01
 
     except Exception as e:
-        # ONLY catch here (top level)
         print(f"[FATAL] {e}", flush=True)
         traceback.print_exc(file=sys.stdout)
 
