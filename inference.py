@@ -6,16 +6,8 @@ import traceback
 from openai import OpenAI
 from core import CustomerSupportEnv
 
-try:
-    API_KEY = os.environ["API_KEY"]   # validator
-except KeyError:
-    API_KEY = os.environ.get("HF_TOKEN")  # HF fallback
-
-try:
-    API_BASE_URL = os.environ["API_BASE_URL"]
-except KeyError:
-    API_BASE_URL = "https://router.huggingface.co/v1"
-
+API_KEY = os.environ.get("API_KEY")
+API_BASE_URL = os.environ.get("API_BASE_URL")
 
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
