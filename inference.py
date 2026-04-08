@@ -37,19 +37,26 @@ def run():
         print("[START] task=customer_support_triage", flush=True)
         total_reward, steps = 0, 0
         for step in range(1, MAX_STEPS + 1):
-            prompt = f"State: {json.dumps(state)}\nReturn JSON: {{"ticket_id": int, "action": "reply"}}"
+            # Fixed f-string syntax
+            prompt = f"State: {json.dumps(state)}\nReturn JSON: {{'ticket_id': int, 'action': 'reply'}}"
+            
             text = call_llm(prompt)
-            action = safe_parse(text) or fallbackpolicy(state)
-            state, reward, done,  = env.step(action)
+            # Fixed typo: fallback_policy
+            action = safe_parse(text) or fallback_policy(state) 
+            
+            state, reward, done = env.step(action)
             total_reward += reward
             steps += 1
             print(f"[STEP] step={step} reward={float(reward):.4f}", flush=True)
             if done: break
+            
         final_score = max(MIN_VAL, min(MAX_VAL, float(total_reward / 50)))
         print(f"[END] success=True steps={steps} rewards={final_score:.4f}", flush=True)
         print(f"[TOTAL_SUMMARY] task=customer_support_triage score={final_score:.4f}", flush=True)
-    except:
+    except Exception:
+        traceback.print_exc() # Useful for debugging before final deployment
         sys.exit(0)
 
-if name == "main":
+if __name__ == "__main__":
     run()
+
