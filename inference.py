@@ -3,14 +3,12 @@ import sys
 import json
 import re
 import traceback
-from openai import OpenAI
-from core import CustomerSupportEnv
 
 # =========================
 # ENV
 # =========================
+API_BASE_URL = os.environ.get("API_BASE_URL", "").strip()
 API_KEY = os.environ.get("HF_TOKEN", os.environ.get("API_KEY", "")).strip()
-API_KEY = os.environ.get("API_KEY", "").strip()
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct").strip()
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
@@ -25,7 +23,12 @@ if not API_BASE_URL or not API_KEY:
     from fastapi import FastAPI, Request
 
     app = FastAPI()
-    env = CustomerSupportEnv()
+
+    def get_env():
+        from core import CustomerSupportEnv
+        return CustomerSupportEnv()
+
+    env = get_env()
 
     @app.get("/")
     def root():
@@ -34,7 +37,7 @@ if not API_BASE_URL or not API_KEY:
     @app.post("/reset")
     def reset():
         global env
-        env = CustomerSupportEnv()
+        env = get_env()
         return env.reset()
 
     @app.post("/step")
@@ -106,10 +109,13 @@ def fallback_policy(state):
 # MAIN
 # =========================
 def run():
+    from openai import OpenAI
+    from core import CustomerSupportEnv
+
     success = False
     steps_taken = 0
     rewards = []
-    score = MIN_VAL  # default in case of early crash
+    score = MIN_VAL
 
     log_start("customer_support_triage", "openenv", MODEL_NAME)
 
@@ -182,3 +188,4 @@ Return ONLY JSON:
 if __name__ == "__main__":
     run()
     sys.exit(0)
+in.py
