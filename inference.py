@@ -16,6 +16,9 @@ try:
 except KeyError:
     API_BASE_URL = "https://router.huggingface.co/v1"
 
+
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
 # ── If no proxy creds → we're on the HF Space, run the web server instead ──
