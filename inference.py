@@ -27,8 +27,8 @@ def run():
         print("[START] task=customer_support_triage", flush=True)
 
         # 1. Grab variables
-        api_key = os.environ.get("API_KEY")
-        base_url = os.environ.get("API_BASE_URL")
+        api_key = os.environ["API_KEY"]
+        base_url = os.environ["API_BASE_URL"]
         model_name = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
         # 2. CRITICAL FIX: The 'proxies' error usually happens because 
@@ -43,7 +43,15 @@ def run():
 
         total_reward, steps = 0, 0
         for step in range(1, MAX_STEPS + 1):
-            prompt = f"State: {json.dumps(state)}\nReturn JSON: {{'ticket_id': int, 'action': 'reply'}}"
+            prompt = f"""State:
+            {json.dumps(state)}
+
+            Return ONLY valid JSON:
+            {{
+                "ticket_id": int,
+               "action": "reply" | "close" | "escalate" | "mark_spam"
+            }}
+"""
             
             # 3. LLM Call
             try:
