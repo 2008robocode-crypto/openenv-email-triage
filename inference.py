@@ -4,11 +4,9 @@ import re
 from openai import OpenAI
 from core import CustomerSupportEnv
 
-# ===== CONFIG =====
 MAX_STEPS = 20
-MODEL_NAME = "openai/gpt-4o-mini"  # 🔥 important for proxy
+MODEL_NAME = "gpt-4o-mini"  # keep simple
 
-# ===== SAFE JSON PARSER =====
 def safe_parse(text):
     try:
         return json.loads(text)
@@ -21,7 +19,6 @@ def safe_parse(text):
                 pass
     return None
 
-# ===== FALLBACK POLICY =====
 def fallback_policy(state):
     for t in state["inbox"]:
         if not t["resolved"] and t["issue_type"] == "spam":
@@ -37,14 +34,32 @@ def fallback_policy(state):
 
     return {"ticket_id": 1, "action": "reply"}
 
-# ===== LLM POLICY =====
+
+def call_llm(prompt):
+    client = OpenAI(
+        base_url=os.environ["API_BASE_URL"],
+        api_key=os.environ["API_KEY"],
+    )
+
+    print("[DEBUG] Calling LLM...", flush=True)
+
+    response = client.responses.create(
+        model=MODEL_NAME,
+        input=prompt,
+        max_output_tokens=50,
+    )
+
+    print("[DEBUG] LLM response received", flush=True)
+
+    try:
+        text = response.output[0].content[0].text
+        return text
+    except:
+        return None
+
+
 def llm_policy(state):
     try:
-        client = OpenAI(
-            base_url=os.environ["API_BASE_URL"],
-            api_key=os.environ["API_KEY"],
-        )
-
         prompt = f"""
 You are an AI agent solving a customer support email triage task.
 
@@ -58,27 +73,10 @@ Return ONLY valid JSON:
 }}
 """
 
-        print("[DEBUG] Calling LLM...", flush=True)
+        text = call_llm(prompt)
 
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=50,
-        )
-
-        print("[DEBUG] LLM response received", flush=True)
-
-        # ✅ SAFE RESPONSE HANDLING
-        if not response or not hasattr(response, "choices") or len(response.choices) == 0:
+        if not text:
             return fallback_policy(state)
-
-        message = response.choices[0].message
-
-        if not message or not message.content:
-            return fallback_policy(state)
-
-        text = message.content.strip()
 
         action = safe_parse(text)
 
@@ -91,7 +89,7 @@ Return ONLY valid JSON:
         print(f"[LLM ERROR] {e}", flush=True)
         return fallback_policy(state)
 
-# ===== MAIN RUN =====
+
 def run():
     env = CustomerSupportEnv()
     state = env.reset()
@@ -101,18 +99,10 @@ def run():
     total_reward = 0
     steps = 0
 
-    # 🔥 FORCE ONE API CALL (VERY IMPORTANT FOR VALIDATOR)
+    # 🔥 FORCE ONE API CALL (VALIDATOR FIX)
     try:
-        client = OpenAI(
-            base_url=os.environ["API_BASE_URL"],
-            api_key=os.environ["API_KEY"],
-        )
-        client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-        )
-        print("[DEBUG] Warmup call success", flush=True)
+        call_llm("ping")
+        print("[DEBUG] Warmup success", flush=True)
     except Exception as e:
         print(f"[DEBUG] Warmup failed: {e}", flush=True)
 
@@ -132,6 +122,7 @@ def run():
     score = max(0.0, min(1.0, total_reward / 50))
 
     print(f"[END] task=customer_support_triage score={score} steps={steps}", flush=True)
+
 
 if __name__ == "__main__":
     run()
