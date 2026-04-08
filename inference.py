@@ -7,10 +7,14 @@ from openai import OpenAI
 from core import CustomerSupportEnv
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
-API_BASE_URL = os.environ.get("API_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "https://router.huggingface.co/v1"
-API_KEY = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN") or "dummy_key"
-MODEL_NAME = os.environ.get("MODEL_NAME") or os.environ.get("LLM_MODEL") or "Qwen/Qwen2.5-72B-Instruct"
+API_BASE_URL = os.environ.get("API_BASE_URL")
+API_KEY = os.environ.get("API_KEY")
+MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
+if not API_KEY or not API_BASE_URL:
+    print("CRITICAL: API environment variables are missing!")
+else: 
+    
 def safe_parse(text):
     if not text: return None
     match = re.search(r"{.*}", text, re.DOTALL)
