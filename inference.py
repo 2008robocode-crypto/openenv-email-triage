@@ -6,29 +6,44 @@ import traceback
 from openai import OpenAI
 from core import CustomerSupportEnv
 
-# =========================================================
-# CONFIG — use validator-injected vars, NO hardcoded fallbacks
-# for API_KEY or API_BASE_URL (would bypass the proxy)
-# =========================================================
 API_KEY      = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY")
 API_BASE_URL = os.environ.get("API_BASE_URL")
 MODEL_NAME   = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
-# Guard: if no proxy credentials, exit cleanly (e.g. when running on HF Space)
-if not API_KEY or not API_BASE_URL:
-    print("[INFO] No proxy credentials found, exiting.", flush=True)
-    sys.exit(0)
-
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
-# =========================================================
-# LOGGING — exact format from official sample inference.py
-# [START] task=X env=X model=X
-# [STEP]  step=N action=X reward=0.00 done=false error=null
-# [END]   success=true steps=N score=0.000 rewards=r1,r2,...
-# =========================================================
-def log_start(task, env, model):
-    print(f"[START] task={task} env={env} model={model}", flush=True)
+# ── If no proxy creds → we're on the HF Space, run the web server instead ──
+if not API_KEY or not API_BASE_URL:
+    import uvicorn
+    from fastapi import FastAPI, Request
+
+    app = FastAPI()
+    env = CustomerSupportEnv()
+
+    @app.get("/")
+    def root():
+        return {"status": "running"}
+
+    @app.post("/reset")
+    def reset():
+        global env
+        env = CustomerSupportEnv()
+        return env.reset()
+
+    @app.post("/step")
+    async def step(request: Request):
+        global env
+        action = await request.json()
+        state, reward, done, info = env.step(action)
+        return {"state": state, "reward": reward, "done": done, "info": info}
+
+    if __name__ == "__main__":
+        uvicorn.run(app, host="0.0.0.0", port=7860)
+    sys.exit(0)
+
+# ── Otherwise → validator mode ──
+def log_start(task, env_name, model):
+    print(f"[START] task={task} env={env_name} model={model}", flush=True)
 
 def log_step(step, action_str, reward, done, error=None):
     print(
@@ -46,31 +61,14 @@ def log_end(success, steps, score, rewards):
         flush=True
     )
 
-# =========================================================
-# LLM CALL — hard fail logs so validator can see proxy errors
-# =========================================================
-def call_llm(client, prompt):
-    if not API_KEY or not API_BASE_URL:
-        print("[DEBUG] MISSING: API_KEY or API_BASE_URL not injected by validator!", flush=True)
-        return None
-    try:
-        res = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=100,
-            temperature=0,
-            timeout=20.0,
-        )
-        text = res.choices[0].message.content.strip()
-        print(f"[DEBUG] LLM raw response: {text[:100]}", flush=True)
-        return text
-    except Exception as e:
-        print(f"[DEBUG] LLM call failed: {type(e).__name__}: {e}", flush=True)
-        return None
+def safe_parse(text):
+    if not text: return None
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try: return json.loads(match.group())
+        except: pass
+    return None
 
-# =========================================================
-# FALLBACK POLICY — used only when LLM call fails/parse fails
-# =========================================================
 def fallback_policy(state):
     inbox = state.get("inbox", [])
     for t in inbox:
@@ -82,51 +80,44 @@ def fallback_policy(state):
     tid = inbox[0]["id"] if inbox else 1
     return {"ticket_id": tid, "action": "close"}
 
-# =========================================================
-# JSON PARSER
-# =========================================================
-def safe_parse(text):
-    if not text:
+def call_llm(client, prompt):
+    try:
+        res = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=100,
+            temperature=0,
+            timeout=20.0,
+        )
+        text = res.choices[0].message.content.strip()
+        print(f"[DEBUG] LLM response: {text[:100]}", flush=True)
+        return text
+    except Exception as e:
+        print(f"[DEBUG] LLM call failed: {type(e).__name__}: {e}", flush=True)
         return None
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except:
-            pass
-    return None
 
-# =========================================================
-# MAIN
-# =========================================================
 def run():
     success = False
     steps_taken = 0
     final_score = MIN_VAL
     rewards = []
 
-    log_start(task="customer_support_triage", env="openenv", model=MODEL_NAME)
-
-    # Debug: confirm env vars are present
+    log_start(task="customer_support_triage", env_name="openenv", model=MODEL_NAME)
     print(f"[DEBUG] API_BASE_URL={API_BASE_URL}", flush=True)
-    print(f"[DEBUG] API_KEY={'SET' if API_KEY else 'NOT SET'}", flush=True)
-    print(f"[DEBUG] MODEL_NAME={MODEL_NAME}", flush=True)
+    print(f"[DEBUG] API_KEY=SET", flush=True)
 
     try:
         env = CustomerSupportEnv()
         state = env.reset()
-
         client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY, timeout=20.0)
 
-        # Smoke test — one call before the loop to confirm proxy works
-        print("[DEBUG] Running smoke test call...", flush=True)
+        print("[DEBUG] Smoke test...", flush=True)
         smoke = call_llm(client, 'Reply with the single word: ok')
-        print(f"[DEBUG] Smoke test result: {smoke}", flush=True)
+        print(f"[DEBUG] Smoke test: {smoke}", flush=True)
 
         done = False
         for step in range(1, MAX_STEPS + 1):
-            if done:
-                break
+            if done: break
 
             prompt = (
                 f"You are a customer support triage agent.\n"
@@ -143,9 +134,7 @@ def run():
             if not action:
                 action = fallback_policy(state)
                 error = "parse_failed"
-                print(f"[DEBUG] step={step} using fallback: {action}", flush=True)
 
-            # env.step() returns (state, reward, done) or (state, reward, done, info)
             step_result = env.step(action)
             state   = step_result[0]
             reward  = float(step_result[1])
@@ -153,14 +142,7 @@ def run():
 
             rewards.append(reward)
             steps_taken = step
-
-            log_step(
-                step=step,
-                action_str=json.dumps(action),
-                reward=reward,
-                done=done,
-                error=error
-            )
+            log_step(step=step, action_str=json.dumps(action), reward=reward, done=done, error=error)
 
         raw_score = sum(rewards) / 50 if rewards else MIN_VAL
         final_score = max(MIN_VAL, min(MAX_VAL, raw_score))
