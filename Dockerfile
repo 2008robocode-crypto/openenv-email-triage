@@ -7,4 +7,4 @@ COPY . .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-CMD ["python", "server/app.py"]
+CMD ["python", "inference.py"]
