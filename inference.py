@@ -7,17 +7,18 @@ from openai import OpenAI
 from core import CustomerSupportEnv
 
 # =========================
-# ENV (dual mode safe)
+# ENV
 # =========================
-API_BASE_URL = os.environ.get("API_BASE_URL")
-API_KEY = os.environ.get("API_KEY")
-MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+API_KEY = os.environ.get("HF_TOKEN", os.environ.get("API_KEY", "")).strip()
+API_KEY = os.environ.get("API_KEY", "").strip()
+MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct").strip()
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
+print(f"[DEBUG] API_BASE_URL={'SET' if API_BASE_URL else 'MISSING'} API_KEY={'SET' if API_KEY else 'MISSING'} MODEL={MODEL_NAME}", flush=True)
 
 # =========================
-# HF SPACE MODE (no validator env)
+# HF SPACE MODE
 # =========================
 if not API_BASE_URL or not API_KEY:
     import uvicorn
@@ -50,7 +51,7 @@ if not API_BASE_URL or not API_KEY:
 
 
 # =========================
-# LOGGING (STRICT FORMAT)
+# LOGGING
 # =========================
 def log_start(task, env_name, model):
     print(f"[START] task={task} env={env_name} model={model}", flush=True)
@@ -108,7 +109,7 @@ def run():
     success = False
     steps_taken = 0
     rewards = []
-    score = 0  # <-- initialize here to avoid UnboundLocalError
+    score = MIN_VAL  # default in case of early crash
 
     log_start("customer_support_triage", "openenv", MODEL_NAME)
 
@@ -121,12 +122,13 @@ def run():
             api_key=API_KEY
         )
 
-        # 🔥 FORCE API CALL (NO TRY/EXCEPT)
+        # Verify proxy connection
         client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": "Say OK"}],
             max_tokens=5,
         )
+        print("[DEBUG] Proxy connection verified", flush=True)
 
         done = False
 
@@ -158,6 +160,7 @@ Return ONLY JSON:
                 error = "parse_failed"
 
             state, reward, done, _ = env.step(action)
+
             reward = float(reward)
             rewards.append(reward)
             steps_taken = step
@@ -173,7 +176,6 @@ Return ONLY JSON:
         traceback.print_exc(file=sys.stdout)
 
     finally:
-        # safe because score is always initialized
         log_end(success, steps_taken, score, rewards)
 
 
