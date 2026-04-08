@@ -6,9 +6,9 @@ import traceback
 from openai import OpenAI
 from core import CustomerSupportEnv
 
-API_KEY      = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY")
-API_BASE_URL = os.environ.get("API_BASE_URL")
-MODEL_NAME   = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL")
+MODEL_NAME   = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
