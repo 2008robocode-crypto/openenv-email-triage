@@ -4,9 +4,8 @@ import re
 from openai import OpenAI
 from core import CustomerSupportEnv
 
-# ===== CONFIG =====
 MAX_STEPS = 20
-MODEL_NAME = os.getenv("MODEL_NAME")
+
 
 # ===== SAFE JSON PARSER =====
 def safe_parse(text):
@@ -20,6 +19,7 @@ def safe_parse(text):
             except:
                 pass
     return None
+
 
 # ===== FALLBACK POLICY =====
 def fallback_policy(state):
@@ -37,7 +37,8 @@ def fallback_policy(state):
 
     return {"ticket_id": 1, "action": "reply"}
 
-# ===== CREATE CLIENT SAFELY =====
+
+# ===== SAFE CLIENT CREATION =====
 def get_client():
     try:
         return OpenAI(
@@ -48,8 +49,11 @@ def get_client():
         print(f"[CLIENT ERROR] {e}", flush=True)
         return None
 
+
 # ===== LLM POLICY =====
-def llm_policy(state, client):
+def llm_policy(state):
+    client = get_client()
+
     if client is None:
         return fallback_policy(state)
 
@@ -68,27 +72,23 @@ Return ONLY valid JSON:
 
     try:
         response = client.chat.completions.create(
-            model=MODEL_NAME,
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            max_tokens=80,
+            max_tokens=50,
         )
 
-        # 🔥 SAFE ACCESS
+        # ✅ SAFE access (fixes "list index out of range")
         if not response or not response.choices:
-            print("[WARN] Empty response", flush=True)
             return fallback_policy(state)
 
         text = response.choices[0].message.content
-
         if not text:
-            print("[WARN] Empty content", flush=True)
             return fallback_policy(state)
 
         action = safe_parse(text)
 
         if not action or "ticket_id" not in action or "action" not in action:
-            print("[WARN] Bad JSON", flush=True)
             return fallback_policy(state)
 
         return action
@@ -97,21 +97,24 @@ Return ONLY valid JSON:
         print(f"[LLM ERROR] {e}", flush=True)
         return fallback_policy(state)
 
+
 # ===== MAIN RUN =====
 def run():
     env = CustomerSupportEnv()
     state = env.reset()
-
-    client = get_client()
 
     print("[START] task=customer_support_triage", flush=True)
 
     total_reward = 0
 
     for step in range(1, MAX_STEPS + 1):
-        action = llm_policy(state, client)
+        action = llm_policy(state)
 
-        state, reward, done, _ = env.step(action)
+        try:
+            state, reward, done, _ = env.step(action)
+        except Exception as e:
+            print(f"[ENV ERROR] {e}", flush=True)
+            break
 
         total_reward += reward
 
@@ -121,8 +124,11 @@ def run():
             break
 
     score = max(0.0, min(1.0, total_reward / 50))
-
     print(f"[END] score={score}", flush=True)
 
+
 if __name__ == "__main__":
-    run()
+    try:
+        run()
+    except Exception as e:
+        print(f"[FATAL ERROR] {e}", flush=True)
