@@ -14,6 +14,11 @@ API_KEY      = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY")
 API_BASE_URL = os.environ.get("API_BASE_URL")
 MODEL_NAME   = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
+# Guard: if no proxy credentials, exit cleanly (e.g. when running on HF Space)
+if not API_KEY or not API_BASE_URL:
+    print("[INFO] No proxy credentials found, exiting.", flush=True)
+    sys.exit(0)
+
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
 # =========================================================
