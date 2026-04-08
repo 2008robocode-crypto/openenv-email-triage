@@ -108,6 +108,7 @@ def run():
     success = False
     steps_taken = 0
     rewards = []
+    score = 0  # <-- initialize here to avoid UnboundLocalError
 
     log_start("customer_support_triage", "openenv", MODEL_NAME)
 
@@ -149,7 +150,6 @@ Return ONLY JSON:
             )
 
             text = res.choices[0].message.content.strip()
-
             action = safe_parse(text)
             error = None
 
@@ -158,7 +158,6 @@ Return ONLY JSON:
                 error = "parse_failed"
 
             state, reward, done, _ = env.step(action)
-
             reward = float(reward)
             rewards.append(reward)
             steps_taken = step
@@ -174,6 +173,7 @@ Return ONLY JSON:
         traceback.print_exc(file=sys.stdout)
 
     finally:
+        # safe because score is always initialized
         log_end(success, steps_taken, score, rewards)
 
 
