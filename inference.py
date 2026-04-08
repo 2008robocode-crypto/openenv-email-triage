@@ -6,102 +6,168 @@ import traceback
 from openai import OpenAI
 from core import CustomerSupportEnv
 
+# =========================================================
+# CONFIG — use validator-injected vars, NO hardcoded fallbacks
+# for API_KEY or API_BASE_URL (would bypass the proxy)
+# =========================================================
+API_KEY      = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY")
+API_BASE_URL = os.environ.get("API_BASE_URL")
+MODEL_NAME   = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
+# =========================================================
+# LOGGING — exact format from official sample inference.py
+# [START] task=X env=X model=X
+# [STEP]  step=N action=X reward=0.00 done=false error=null
+# [END]   success=true steps=N score=0.000 rewards=r1,r2,...
+# =========================================================
+def log_start(task, env, model):
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+def log_step(step, action_str, reward, done, error=None):
+    print(
+        f"[STEP] step={step} action={action_str} "
+        f"reward={reward:.2f} done={str(done).lower()} "
+        f"error={error if error else 'null'}",
+        flush=True
+    )
+
+def log_end(success, steps, score, rewards):
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} "
+        f"score={score:.3f} rewards={rewards_str}",
+        flush=True
+    )
+
+# =========================================================
+# LLM CALL — hard fail logs so validator can see proxy errors
+# =========================================================
+def call_llm(client, prompt):
+    if not API_KEY or not API_BASE_URL:
+        print("[DEBUG] MISSING: API_KEY or API_BASE_URL not injected by validator!", flush=True)
+        return None
+    try:
+        res = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=100,
+            temperature=0,
+            timeout=20.0,
+        )
+        text = res.choices[0].message.content.strip()
+        print(f"[DEBUG] LLM raw response: {text[:100]}", flush=True)
+        return text
+    except Exception as e:
+        print(f"[DEBUG] LLM call failed: {type(e).__name__}: {e}", flush=True)
+        return None
+
+# =========================================================
+# FALLBACK POLICY — used only when LLM call fails/parse fails
+# =========================================================
+def fallback_policy(state):
+    inbox = state.get("inbox", [])
+    for t in inbox:
+        if not t.get("resolved") and t.get("issue_type") == "spam":
+            return {"ticket_id": t["id"], "action": "mark_spam"}
+    for t in inbox:
+        if not t.get("resolved"):
+            return {"ticket_id": t["id"], "action": "reply"}
+    tid = inbox[0]["id"] if inbox else 1
+    return {"ticket_id": tid, "action": "close"}
+
+# =========================================================
+# JSON PARSER
+# =========================================================
 def safe_parse(text):
-    if not text: return None
+    if not text:
+        return None
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         try:
-            content = match.group().replace("'", '"')
-            return json.loads(content)
+            return json.loads(match.group())
         except:
             pass
     return None
 
-def make_client():
-    api_key = os.environ["API_KEY"]
-    base_url = os.environ["API_BASE_URL"].rstrip("/")
-    model_name = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-
-    # DO NOT modify base_url — use it exactly as injected by the validator
-    print(f"[CONFIG] base_url={base_url} model={model_name}", flush=True)
-
-    client = OpenAI(
-        base_url=base_url,
-        api_key=api_key,
-        timeout=30.0,
-    )
-    return client, model_name
-
-def llm_call(client, model_name, prompt):
-    res = client.chat.completions.create(
-        model=model_name,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=100,
-        temperature=0,
-    )
-    return res.choices[0].message.content.strip()
-
+# =========================================================
+# MAIN
+# =========================================================
 def run():
+    success = False
+    steps_taken = 0
+    final_score = MIN_VAL
+    rewards = []
+
+    log_start(task="customer_support_triage", env="openenv", model=MODEL_NAME)
+
+    # Debug: confirm env vars are present
+    print(f"[DEBUG] API_BASE_URL={API_BASE_URL}", flush=True)
+    print(f"[DEBUG] API_KEY={'SET' if API_KEY else 'NOT SET'}", flush=True)
+    print(f"[DEBUG] MODEL_NAME={MODEL_NAME}", flush=True)
+
     try:
         env = CustomerSupportEnv()
         state = env.reset()
-        print("[START] task=customer_support_triage", flush=True)
 
-        client, model_name = make_client()
+        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY, timeout=20.0)
 
-        # ── SMOKE TEST ── confirm proxy is reachable before the main loop
-        print("[SMOKE_TEST] sending test call to proxy...", flush=True)
-        try:
-            test_resp = llm_call(client, model_name, 'Reply with the word "ok"')
-            print(f"[SMOKE_TEST] success, response={test_resp[:60]}", flush=True)
-        except Exception as e:
-            print(f"[SMOKE_TEST_FAIL] {type(e).__name__}: {e}", flush=True)
-            traceback.print_exc(file=sys.stdout)
-            # Don't exit — keep going so the validator can at least see the error
+        # Smoke test — one call before the loop to confirm proxy works
+        print("[DEBUG] Running smoke test call...", flush=True)
+        smoke = call_llm(client, 'Reply with the single word: ok')
+        print(f"[DEBUG] Smoke test result: {smoke}", flush=True)
 
-        total_reward, steps = 0, 0
+        done = False
         for step in range(1, MAX_STEPS + 1):
-            prompt = (
-                f"State:\n{json.dumps(state)}\n\n"
-                "Return ONLY valid JSON with no explanation:\n"
-                '{"ticket_id": <int>, "action": "reply" | "close" | "escalate" | "mark_spam"}'
-            )
-
-            action = None
-            try:
-                text = llm_call(client, model_name, prompt)
-                print(f"[LLM] step={step} raw={text[:100]}", flush=True)
-                action = safe_parse(text)
-                if not action:
-                    print(f"[PARSE_FAIL] step={step} could not parse: {text}", flush=True)
-            except Exception as e:
-                print(f"[LLM_ERROR] step={step} {type(e).__name__}: {e}", flush=True)
-                traceback.print_exc(file=sys.stdout)
-
-            if not action:
-                inbox = state.get("inbox", [])
-                tid = inbox[0]["id"] if inbox else 1
-                action = {"ticket_id": tid, "action": "reply"}
-                print(f"[FALLBACK] step={step} action={action}", flush=True)
-
-            step_result = env.step(action)
-            state, reward, done = step_result[0], step_result[1], step_result[2]
-            total_reward += reward
-            steps += 1
-            print(f"[STEP] step={step} reward={float(reward):.4f}", flush=True)
             if done:
                 break
 
-        final_score = max(MIN_VAL, min(MAX_VAL, float(total_reward / 50)))
-        print(f"[END] success=True steps={steps} rewards={final_score:.4f}", flush=True)
-        print(f"[TOTAL_SUMMARY] task=customer_support_triage score={final_score:.4f}", flush=True)
+            prompt = (
+                f"You are a customer support triage agent.\n"
+                f"Current state:\n{json.dumps(state, indent=2)}\n\n"
+                f"Choose the best action for one unresolved ticket.\n"
+                f"Return ONLY valid JSON, no explanation, no markdown:\n"
+                f'{{ "ticket_id": <int>, "action": "<reply|close|escalate|mark_spam>" }}'
+            )
+
+            text = call_llm(client, prompt)
+            action = safe_parse(text)
+            error = None
+
+            if not action:
+                action = fallback_policy(state)
+                error = "parse_failed"
+                print(f"[DEBUG] step={step} using fallback: {action}", flush=True)
+
+            # env.step() returns (state, reward, done) or (state, reward, done, info)
+            step_result = env.step(action)
+            state   = step_result[0]
+            reward  = float(step_result[1])
+            done    = step_result[2]
+
+            rewards.append(reward)
+            steps_taken = step
+
+            log_step(
+                step=step,
+                action_str=json.dumps(action),
+                reward=reward,
+                done=done,
+                error=error
+            )
+
+        raw_score = sum(rewards) / 50 if rewards else MIN_VAL
+        final_score = max(MIN_VAL, min(MAX_VAL, raw_score))
+        success = final_score > 0.01
 
     except Exception as e:
-        print(f"[FATAL] {e}", flush=True)
+        print(f"[DEBUG] FATAL: {type(e).__name__}: {e}", flush=True)
         traceback.print_exc(file=sys.stdout)
-        sys.exit(0)
+
+    finally:
+        log_end(success=success, steps=steps_taken, score=final_score, rewards=rewards)
 
 if __name__ == "__main__":
     run()
+    sys.exit(0)
