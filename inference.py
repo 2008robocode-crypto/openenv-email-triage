@@ -9,15 +9,14 @@ from core import CustomerSupportEnv
 # =========================
 # ENV VARIABLES
 # =========================
-# Required — validator provides these
-API_BASE_URL = os.environ["API_BASE_URL"]
-API_KEY      = os.environ["API_KEY"]
+API_BASE_URL = os.environ["API_BASE_URL"]  # must use validator's proxy
+API_KEY      = os.environ["API_KEY"]       # must use validator's key
 MODEL_NAME   = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")  # optional fallback
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
 # =========================
-# LOGGING (STRICT FORMAT)
+# LOGGING
 # =========================
 def log_start(task, env_name, model):
     print(f"[START] task={task} env={env_name} model={model}", flush=True)
@@ -71,7 +70,7 @@ def run():
     success = False
     steps_taken = 0
     rewards = []
-    score = 0  # ✅ initialize to avoid UnboundLocalError
+    score = 0  # initialize to avoid UnboundLocalError
 
     log_start("customer_support_triage", "openenv", MODEL_NAME)
 
@@ -80,15 +79,8 @@ def run():
         state = env.reset()
 
         client = OpenAI(
-            base_url=API_BASE_URL,
+            base_url=API_BASE_URL,  # validator proxy
             api_key=API_KEY
-        )
-
-        # 🔥 Test API call
-        client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": "Say OK"}],
-            max_tokens=5,
         )
 
         done = False
@@ -105,11 +97,12 @@ Return ONLY JSON:
 {{"ticket_id": int, "action": "reply|close|escalate|mark_spam"}}
 """
 
+            # ✅ LLM call goes through validator proxy
             res = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=100,
-                temperature=0,
+                temperature=0
             )
 
             text = res.choices[0].message.content.strip()
@@ -127,6 +120,7 @@ Return ONLY JSON:
 
             log_step(step, json.dumps(action), reward, done, error)
 
+        # Compute score
         score = sum(rewards) / 50 if rewards else 0
         score = max(MIN_VAL, min(MAX_VAL, score))
         success = score > 0.01
