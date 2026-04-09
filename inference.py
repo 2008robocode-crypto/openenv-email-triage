@@ -52,6 +52,10 @@ def fallback_policy(state):
     return {"ticket_id": 1, "action": "reply"}
 
 def run():
+    # Unset any other API key env vars that could interfere
+    os.environ.pop("HF_TOKEN", None)
+    os.environ.pop("OPENAI_API_KEY", None)
+    os.environ.pop("OPENAI_BASE_URL", None)
     # Read env vars INSIDE run() exactly as validator instructions say
     api_base_url = os.environ["API_BASE_URL"]
     api_key      = os.environ["API_KEY"]
