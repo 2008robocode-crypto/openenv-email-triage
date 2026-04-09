@@ -3,58 +3,21 @@ import sys
 import json
 import re
 import traceback
+from openai import OpenAI
+from core import CustomerSupportEnv
 
 # =========================
-# ENV
+# ENV VARIABLES
 # =========================
-API_BASE_URL = os.environ.get("API_BASE_URL", "").strip()
-API_KEY = os.environ.get("HF_TOKEN", os.environ.get("API_KEY", "")).strip()
-MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct").strip()
+# Required — validator provides these
+API_BASE_URL = os.environ["API_BASE_URL"]
+API_KEY      = os.environ["API_KEY"]
+MODEL_NAME   = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")  # optional fallback
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
-print(f"[DEBUG] API_BASE_URL={'SET' if API_BASE_URL else 'MISSING'} API_KEY={'SET' if API_KEY else 'MISSING'} MODEL={MODEL_NAME}", flush=True)
-
 # =========================
-# HF SPACE MODE
-# =========================
-if not API_BASE_URL or not API_KEY:
-    import uvicorn
-    from fastapi import FastAPI, Request
-
-    app = FastAPI()
-
-    def get_env():
-        from core import CustomerSupportEnv
-        return CustomerSupportEnv()
-
-    env = get_env()
-
-    @app.get("/")
-    def root():
-        return {"status": "running"}
-
-    @app.post("/reset")
-    def reset():
-        global env
-        env = get_env()
-        return env.reset()
-
-    @app.post("/step")
-    async def step(request: Request):
-        global env
-        action = await request.json()
-        state, reward, done, info = env.step(action)
-        return {"state": state, "reward": reward, "done": done, "info": info}
-
-    if __name__ == "__main__":
-        uvicorn.run(app, host="0.0.0.0", port=7860)
-
-    sys.exit(0)
-
-
-# =========================
-# LOGGING
+# LOGGING (STRICT FORMAT)
 # =========================
 def log_start(task, env_name, model):
     print(f"[START] task={task} env={env_name} model={model}", flush=True)
@@ -67,17 +30,15 @@ def log_step(step, action_str, reward, done, error=None):
         flush=True
     )
 
-def log_end(success, steps, score, rewards):
+def log_end(success, steps_taken, score, rewards):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} "
-        f"score={score:.3f} rewards={rewards_str}",
+        f"[END] task=customer_support_triage score={score:.3f} steps={steps_taken} rewards={rewards_str} success={str(success).lower()}",
         flush=True
     )
 
-
 # =========================
-# PARSER
+# SAFE PARSER
 # =========================
 def safe_parse(text):
     if not text:
@@ -89,7 +50,6 @@ def safe_parse(text):
         except:
             pass
     return None
-
 
 # =========================
 # FALLBACK POLICY
@@ -104,18 +64,14 @@ def fallback_policy(state):
             return {"ticket_id": t["id"], "action": "reply"}
     return {"ticket_id": 1, "action": "close"}
 
-
 # =========================
-# MAIN
+# MAIN RUN FUNCTION
 # =========================
 def run():
-    from openai import OpenAI
-    from core import CustomerSupportEnv
-
     success = False
     steps_taken = 0
     rewards = []
-    score = MIN_VAL
+    score = 0  # ✅ initialize to avoid UnboundLocalError
 
     log_start("customer_support_triage", "openenv", MODEL_NAME)
 
@@ -128,13 +84,12 @@ def run():
             api_key=API_KEY
         )
 
-        # Verify proxy connection
+        # 🔥 Test API call
         client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": "Say OK"}],
             max_tokens=5,
         )
-        print("[DEBUG] Proxy connection verified", flush=True)
 
         done = False
 
@@ -166,7 +121,6 @@ Return ONLY JSON:
                 error = "parse_failed"
 
             state, reward, done, _ = env.step(action)
-
             reward = float(reward)
             rewards.append(reward)
             steps_taken = step
@@ -183,7 +137,6 @@ Return ONLY JSON:
 
     finally:
         log_end(success, steps_taken, score, rewards)
-
 
 if __name__ == "__main__":
     run()
