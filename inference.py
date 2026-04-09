@@ -53,13 +53,17 @@ def fallback_policy(state):
 
 def run():
     # Unset any other API key env vars that could interfere
-    os.environ.pop("HF_TOKEN", None)
-    os.environ.pop("OPENAI_API_KEY", None)
-    os.environ.pop("OPENAI_BASE_URL", None)
+    
     # Read env vars INSIDE run() exactly as validator instructions say
     api_base_url = os.environ["API_BASE_URL"]
-    api_key      = os.environ["API_KEY"]
+    api_key      = os.environ.get("OPENAI_API_KEY") or os.environ.get("API_KEY")
     model_name   = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+    
+    client = OpenAI(
+        base_url=api_base_url,
+        api_key=api_key,
+        timeout=20.0,
+    )
 
     success = False
     steps_taken = 0
@@ -73,11 +77,7 @@ def run():
         env = CustomerSupportEnv()
         state = env.reset()
 
-        client = OpenAI(
-            base_url=api_base_url,
-            api_key=api_key,
-            timeout=20.0,
-        )
+        
 
         done = False
         for step in range(1, MAX_STEPS + 1):
