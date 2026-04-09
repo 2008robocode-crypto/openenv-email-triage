@@ -10,11 +10,14 @@ from core import CustomerSupportEnv
 # STRICT ENV (VALIDATOR MODE)
 # =========================
 API_BASE_URL = os.environ.get("API_BASE_URL")
-API_KEY = os.environ.get("API_KEY")
+API_KEY = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN")
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
-
+if not API_BASE_URL or not API_KEY:
+    print("[FATAL] Missing API_BASE_URL or API_KEY", flush=True)
+    log_end(False, 0, 0.0, [])
+    sys.exit(0)
 # =========================
 # LOGGING
 # =========================
@@ -71,7 +74,7 @@ def run():
     success = False
     steps_taken = 0
     rewards = []
-    score = MIN_VAL
+    score = 0.0
 
     log_start("customer_support_triage", "openenv", MODEL_NAME)
 
@@ -82,12 +85,13 @@ def run():
         # ✅ SAFE CLIENT INIT
         try:
             client = OpenAI(
-                base_url=API_BASE_URL,
-                api_key=API_KEY
+            base_url=API_BASE_URL,
+            api_key=API_KEY
             )
         except Exception as e:
-            print(f"[DEBUG] Client init failed: {e}", flush=True)
-            client = None
+            print(f"[FATAL] OpenAI init failed: {e}", flush=True)
+            log_end(False, 0, 0.0, [])
+            sys.exit(0)
 
         # ✅ FORCE PROXY CALL (even if client exists)
         if client:
@@ -95,7 +99,7 @@ def run():
                 client.chat.completions.create(
                     model=MODEL_NAME,
                     messages=[{"role": "user", "content": "Say OK"}],
-                    max_tokens=5,
+                    max_tokens=10,
                 )
                 print("[DEBUG] Warmup success", flush=True)
             except Exception as e:
@@ -123,7 +127,7 @@ Return ONLY JSON:
                     res = client.chat.completions.create(
                         model=MODEL_NAME,
                         messages=[{"role": "user", "content": prompt}],
-                        max_tokens=100,
+                        max_tokens=10,
                         temperature=0,
                     )
                     text = res.choices[0].message.content.strip()
@@ -145,7 +149,7 @@ Return ONLY JSON:
 
             log_step(step, json.dumps(action), reward, done, error)
 
-        score = sum(rewards) / 50 if rewards else MIN_VAL
+        score = sum(rewards) / 50 if rewards else 0.0
         score = max(MIN_VAL, min(MAX_VAL, score))
         success = score > 0.01
 
