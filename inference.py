@@ -6,18 +6,43 @@ import traceback
 from openai import OpenAI
 from core import CustomerSupportEnv
 
-# =========================
-# ENV VARIABLES
-# =========================
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1") # must use validator's proxy
-API_KEY      = os.environ["API_KEY"]       # must use validator's key
-MODEL_NAME   = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")  # optional fallback
+# NO fallback for API_BASE_URL — use validator's proxy exactly as injected
+API_KEY      = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY")
+API_BASE_URL = os.environ.get("API_BASE_URL")
+MODEL_NAME   = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
-# =========================
-# LOGGING
-# =========================
+# If no creds (e.g. HF Space), run web server instead
+if not API_KEY or not API_BASE_URL:
+    try:
+        import uvicorn
+        from fastapi import FastAPI, Request
+        app = FastAPI()
+        _env = CustomerSupportEnv()
+
+        @app.get("/")
+        def root(): return {"status": "running"}
+
+        @app.post("/reset")
+        def reset():
+            global _env
+            _env = CustomerSupportEnv()
+            return _env.reset()
+
+        @app.post("/step")
+        async def step(request: Request):
+            global _env
+            action = await request.json()
+            state, reward, done, info = _env.step(action)
+            return {"state": state, "reward": reward, "done": done, "info": info}
+
+        if __name__ == "__main__":
+            uvicorn.run(app, host="0.0.0.0", port=7860)
+    except Exception as e:
+        print(f"[INFO] Space mode failed: {e}", flush=True)
+    sys.exit(0)
+
 def log_start(task, env_name, model):
     print(f"[START] task={task} env={env_name} model={model}", flush=True)
 
@@ -29,30 +54,23 @@ def log_step(step, action_str, reward, done, error=None):
         flush=True
     )
 
-def log_end(success, steps_taken, score, rewards):
+def log_end(success, steps, score, rewards):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    # Exact format from official sample — no task= field
     print(
-        f"[END] task=customer_support_triage score={score:.3f} steps={steps_taken} rewards={rewards_str} success={str(success).lower()}",
+        f"[END] success={str(success).lower()} steps={steps} "
+        f"score={score:.3f} rewards={rewards_str}",
         flush=True
     )
 
-# =========================
-# SAFE PARSER
-# =========================
 def safe_parse(text):
-    if not text:
-        return None
+    if not text: return None
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
-        try:
-            return json.loads(match.group())
-        except:
-            pass
+        try: return json.loads(match.group())
+        except: pass
     return None
 
-# =========================
-# FALLBACK POLICY
-# =========================
 def fallback_policy(state):
     inbox = state.get("inbox", [])
     for t in inbox:
@@ -61,69 +79,68 @@ def fallback_policy(state):
     for t in inbox:
         if not t.get("resolved"):
             return {"ticket_id": t["id"], "action": "reply"}
-    return {"ticket_id": 1, "action": "close"}
+    return {"ticket_id": inbox[0]["id"] if inbox else 1, "action": "close"}
 
-# =========================
-# MAIN RUN FUNCTION
-# =========================
 def run():
     success = False
     steps_taken = 0
     rewards = []
-    score = 0  # initialize to avoid UnboundLocalError
+    score = MIN_VAL
 
     log_start("customer_support_triage", "openenv", MODEL_NAME)
+    print(f"[DEBUG] API_BASE_URL={API_BASE_URL}", flush=True)
+    print(f"[DEBUG] API_KEY=SET model={MODEL_NAME}", flush=True)
 
     try:
         env = CustomerSupportEnv()
         state = env.reset()
-
-        client = OpenAI(
-            base_url=API_BASE_URL,  # validator proxy
-            api_key=API_KEY
-        )
+        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY, timeout=20.0)
 
         done = False
         for step in range(1, MAX_STEPS + 1):
-            if done:
-                break
+            if done: break
 
-            # ✅ single-line JSON prompt for validator detection
-            prompt_dict = {
-                "state": state,
-                "return_only": ["ticket_id", "action"]
-            }
-            prompt = json.dumps(prompt_dict)
-
-            res = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=100,
-                temperature=0
+            prompt = (
+                f"You are a customer support triage agent.\n"
+                f"State:\n{json.dumps(state, indent=2)}\n\n"
+                f"Return ONLY valid JSON, no explanation:\n"
+                f'{{ "ticket_id": <int>, "action": "<reply|close|escalate|mark_spam>" }}'
             )
 
-            text = res.choices[0].message.content.strip()
-            action = safe_parse(text)
+            action = None
             error = None
+            try:
+                res = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=100,
+                    temperature=0,
+                )
+                text = res.choices[0].message.content.strip()
+                print(f"[DEBUG] step={step} llm={text[:80]}", flush=True)
+                action = safe_parse(text)
+            except Exception as e:
+                print(f"[DEBUG] LLM error step={step}: {type(e).__name__}: {e}", flush=True)
+                error = "llm_failed"
 
             if not action:
                 action = fallback_policy(state)
-                error = "parse_failed"
+                if not error: error = "parse_failed"
 
-            state, reward, done, _ = env.step(action)
-            reward = float(reward)
+            step_result = env.step(action)
+            state  = step_result[0]
+            reward = float(step_result[1])
+            done   = step_result[2]
+
             rewards.append(reward)
             steps_taken = step
-
             log_step(step, json.dumps(action), reward, done, error)
 
-        # Compute score
-        score = sum(rewards) / 50 if rewards else 0
-        score = max(MIN_VAL, min(MAX_VAL, score))
+        score = max(MIN_VAL, min(MAX_VAL, sum(rewards) / 50)) if rewards else MIN_VAL
         success = score > 0.01
 
     except Exception as e:
-        print(f"[FATAL] {e}", flush=True)
+        print(f"[FATAL] {type(e).__name__}: {e}", flush=True)
         traceback.print_exc(file=sys.stdout)
 
     finally:
