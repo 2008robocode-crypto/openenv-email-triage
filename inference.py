@@ -3,26 +3,35 @@ import sys
 import json
 import re
 import traceback
+
+# 🚫 CRITICAL: Disable broken proxy env (fixes httpx crash)
+os.environ.pop("HTTP_PROXY", None)
+os.environ.pop("HTTPS_PROXY", None)
+os.environ.pop("ALL_PROXY", None)
+os.environ.pop("http_proxy", None)
+os.environ.pop("https_proxy", None)
+os.environ.pop("all_proxy", None)
+
 from openai import OpenAI
 from core import CustomerSupportEnv
 
+
 # =========================
-# STRICT ENV (VALIDATOR MODE)
+# ENV
 # =========================
 API_BASE_URL = os.environ.get("API_BASE_URL")
 API_KEY = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN")
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
-if not API_BASE_URL or not API_KEY:
-    print("[FATAL] Missing API_BASE_URL or API_KEY", flush=True)
-    log_end(False, 0, 0.0, [])
-    sys.exit(0)
+
+
 # =========================
-# LOGGING
+# LOGGING (STRICT FORMAT)
 # =========================
 def log_start(task, env_name, model):
     print(f"[START] task={task} env={env_name} model={model}", flush=True)
+
 
 def log_step(step, action_str, reward, done, error=None):
     print(
@@ -32,6 +41,7 @@ def log_step(step, action_str, reward, done, error=None):
         flush=True
     )
 
+
 def log_end(success, steps, score, rewards):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
@@ -39,6 +49,7 @@ def log_end(success, steps, score, rewards):
         f"score={score:.3f} rewards={rewards_str}",
         flush=True
     )
+
 
 # =========================
 # PARSER
@@ -54,18 +65,23 @@ def safe_parse(text):
             pass
     return None
 
+
 # =========================
-# FALLBACK
+# FALLBACK POLICY
 # =========================
 def fallback_policy(state):
     inbox = state.get("inbox", [])
+
     for t in inbox:
         if not t.get("resolved") and t.get("issue_type") == "spam":
             return {"ticket_id": t["id"], "action": "mark_spam"}
+
     for t in inbox:
         if not t.get("resolved"):
             return {"ticket_id": t["id"], "action": "reply"}
+
     return {"ticket_id": 1, "action": "close"}
+
 
 # =========================
 # MAIN
@@ -79,31 +95,36 @@ def run():
     log_start("customer_support_triage", "openenv", MODEL_NAME)
 
     try:
+        # ✅ ENV CHECK (prevents crash)
+        if not API_BASE_URL or not API_KEY:
+            print("[FATAL] Missing API_BASE_URL or API_KEY", flush=True)
+            log_end(False, 0, 0.0, [])
+            sys.exit(0)
+
         env = CustomerSupportEnv()
         state = env.reset()
 
         # ✅ SAFE CLIENT INIT
         try:
             client = OpenAI(
-            base_url=API_BASE_URL,
-            api_key=API_KEY
+                base_url=API_BASE_URL,
+                api_key=API_KEY
             )
         except Exception as e:
             print(f"[FATAL] OpenAI init failed: {e}", flush=True)
             log_end(False, 0, 0.0, [])
             sys.exit(0)
 
-        # ✅ FORCE PROXY CALL (even if client exists)
-        if client:
-            try:
-                client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=[{"role": "user", "content": "Say OK"}],
-                    max_tokens=10,
-                )
-                print("[DEBUG] Warmup success", flush=True)
-            except Exception as e:
-                print(f"[DEBUG] Warmup failed: {e}", flush=True)
+        # 🔥 FORCE PROXY HIT (VERY IMPORTANT)
+        try:
+            client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[{"role": "user", "content": "Say OK"}],
+                max_tokens=5,
+            )
+            print("[DEBUG] Warmup success", flush=True)
+        except Exception as e:
+            print(f"[DEBUG] Warmup failed: {e}", flush=True)
 
         done = False
 
@@ -122,19 +143,19 @@ Return ONLY JSON:
             action = None
             error = None
 
-            if client:
-                try:
-                    res = client.chat.completions.create(
-                        model=MODEL_NAME,
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=10,
-                        temperature=0,
-                    )
-                    text = res.choices[0].message.content.strip()
-                    action = safe_parse(text)
-                except Exception as e:
-                    print(f"[DEBUG] LLM ERROR: {e}", flush=True)
-                    error = "llm_failed"
+            try:
+                res = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=100,
+                    temperature=0,
+                )
+                text = res.choices[0].message.content.strip()
+                action = safe_parse(text)
+
+            except Exception as e:
+                print(f"[DEBUG] LLM ERROR: {e}", flush=True)
+                error = "llm_failed"
 
             if not action:
                 action = fallback_policy(state)
@@ -149,7 +170,7 @@ Return ONLY JSON:
 
             log_step(step, json.dumps(action), reward, done, error)
 
-        score = sum(rewards) / 50 if rewards else 0.0
+        score = sum(rewards) / 50 if rewards else MIN_VAL
         score = max(MIN_VAL, min(MAX_VAL, score))
         success = score > 0.01
 
@@ -159,6 +180,7 @@ Return ONLY JSON:
 
     finally:
         log_end(success, steps_taken, score, rewards)
+
 
 if __name__ == "__main__":
     run()
