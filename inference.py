@@ -6,11 +6,6 @@ import traceback
 from openai import OpenAI
 from core import CustomerSupportEnv
 
-# Exactly as the validator instructions say
-API_BASE_URL = os.environ["API_BASE_URL"]
-API_KEY      = os.environ["API_KEY"]
-MODEL_NAME   = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
 def log_start(task, env_name, model):
@@ -57,19 +52,28 @@ def fallback_policy(state):
     return {"ticket_id": 1, "action": "reply"}
 
 def run():
+    # Read env vars INSIDE run() exactly as validator instructions say
+    api_base_url = os.environ["API_BASE_URL"]
+    api_key      = os.environ["API_KEY"]
+    model_name   = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+
     success = False
     steps_taken = 0
     rewards = []
     score = MIN_VAL
 
-    log_start("customer_support_triage", "openenv", MODEL_NAME)
-    print(f"[DEBUG] base_url={API_BASE_URL} model={MODEL_NAME}", flush=True)
+    log_start("customer_support_triage", "openenv", model_name)
+    print(f"[DEBUG] base_url={api_base_url} model={model_name}", flush=True)
 
     try:
         env = CustomerSupportEnv()
         state = env.reset()
 
-        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY, timeout=20.0)
+        client = OpenAI(
+            base_url=api_base_url,
+            api_key=api_key,
+            timeout=20.0,
+        )
 
         done = False
         for step in range(1, MAX_STEPS + 1):
@@ -87,7 +91,7 @@ def run():
             error = None
             try:
                 res = client.chat.completions.create(
-                    model=MODEL_NAME,
+                    model=model_name,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=100,
                     temperature=0,
