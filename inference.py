@@ -9,7 +9,7 @@ from core import CustomerSupportEnv
 # =========================
 # ENV VARIABLES
 # =========================
-API_BASE_URL = os.environ["API_BASE_URL"]  # must use validator's proxy
+API_BASE_URL = os.environ["API_BASE_URL"] or "https://router.huggingface.co/v1" # must use validator's proxy
 API_KEY      = os.environ["API_KEY"]       # must use validator's key
 MODEL_NAME   = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")  # optional fallback
 
