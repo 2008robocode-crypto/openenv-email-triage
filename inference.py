@@ -7,11 +7,11 @@ from openai import OpenAI
 from core import CustomerSupportEnv
 
 # =========================
-# ENV (CRITICAL FIX)
+# STRICT ENV (VALIDATOR MODE)
 # =========================
-API_BASE_URL = os.getenv("API_BASE_URL")
-API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+API_BASE_URL = os.environ.get("API_BASE_URL")
+API_KEY = os.environ.get("API_KEY")
+MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
@@ -76,25 +76,30 @@ def run():
     log_start("customer_support_triage", "openenv", MODEL_NAME)
 
     try:
-        # 🚨 CRITICAL: validator must have these
-        if not API_BASE_URL or not API_KEY:
-            print("[FATAL] Missing API_BASE_URL or API_KEY", flush=True)
-            return
-
         env = CustomerSupportEnv()
         state = env.reset()
 
-        client = OpenAI(
-            base_url=API_BASE_URL,
-            api_key=API_KEY
-        )
+        # ✅ SAFE CLIENT INIT
+        try:
+            client = OpenAI(
+                base_url=API_BASE_URL,
+                api_key=API_KEY
+            )
+        except Exception as e:
+            print(f"[DEBUG] Client init failed: {e}", flush=True)
+            client = None
 
-        # 🔥 FORCE PROXY HIT (NO EXCUSES)
-        client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": "Say OK"}],
-            max_tokens=5,
-        )
+        # ✅ FORCE PROXY CALL (even if client exists)
+        if client:
+            try:
+                client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=[{"role": "user", "content": "Say OK"}],
+                    max_tokens=5,
+                )
+                print("[DEBUG] Warmup success", flush=True)
+            except Exception as e:
+                print(f"[DEBUG] Warmup failed: {e}", flush=True)
 
         done = False
 
@@ -110,24 +115,27 @@ Return ONLY JSON:
 {{"ticket_id": int, "action": "reply|close|escalate|mark_spam"}}
 """
 
-            try:
-                res = client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=100,
-                    temperature=0,
-                )
-                text = res.choices[0].message.content.strip()
-                action = safe_parse(text)
-                error = None
-            except Exception as e:
-                print(f"[DEBUG] LLM ERROR: {e}", flush=True)
-                action = None
-                error = "llm_failed"
+            action = None
+            error = None
+
+            if client:
+                try:
+                    res = client.chat.completions.create(
+                        model=MODEL_NAME,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=100,
+                        temperature=0,
+                    )
+                    text = res.choices[0].message.content.strip()
+                    action = safe_parse(text)
+                except Exception as e:
+                    print(f"[DEBUG] LLM ERROR: {e}", flush=True)
+                    error = "llm_failed"
 
             if not action:
                 action = fallback_policy(state)
-                error = "parse_failed"
+                if not error:
+                    error = "parse_failed"
 
             state, reward, done, _ = env.step(action)
 
@@ -147,7 +155,6 @@ Return ONLY JSON:
 
     finally:
         log_end(success, steps_taken, score, rewards)
-
 
 if __name__ == "__main__":
     run()
