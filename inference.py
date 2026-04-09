@@ -84,20 +84,17 @@ def run():
         )
 
         done = False
-
         for step in range(1, MAX_STEPS + 1):
             if done:
                 break
 
-            prompt = f"""
-State:
-{json.dumps(state)}
+            # ✅ single-line JSON prompt for validator detection
+            prompt_dict = {
+                "state": state,
+                "return_only": ["ticket_id", "action"]
+            }
+            prompt = json.dumps(prompt_dict)
 
-Return ONLY JSON:
-{{"ticket_id": int, "action": "reply|close|escalate|mark_spam"}}
-"""
-
-            # ✅ LLM call goes through validator proxy
             res = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=[{"role": "user", "content": prompt}],
