@@ -6,14 +6,16 @@ import traceback
 from openai import OpenAI
 from core import CustomerSupportEnv
 
-# NO fallback for API_BASE_URL — use validator's proxy exactly as injected
-API_KEY      = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY")
+# ── Use ONLY the exact variable names the validator injects ──
+# Do NOT check HF_TOKEN — it may be set to your personal token
+# which would bypass the validator's proxy entirely
+API_KEY      = os.environ.get("API_KEY")
 API_BASE_URL = os.environ.get("API_BASE_URL")
 MODEL_NAME   = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
-# If no creds (e.g. HF Space), run web server instead
+# ── If no proxy creds → running on HF Space, start web server ──
 if not API_KEY or not API_BASE_URL:
     try:
         import uvicorn
@@ -22,7 +24,8 @@ if not API_KEY or not API_BASE_URL:
         _env = CustomerSupportEnv()
 
         @app.get("/")
-        def root(): return {"status": "running"}
+        def root():
+            return {"status": "running"}
 
         @app.post("/reset")
         def reset():
@@ -43,6 +46,8 @@ if not API_KEY or not API_BASE_URL:
         print(f"[INFO] Space mode failed: {e}", flush=True)
     sys.exit(0)
 
+# ── Validator mode: proxy creds are present ──
+
 def log_start(task, env_name, model):
     print(f"[START] task={task} env={env_name} model={model}", flush=True)
 
@@ -56,7 +61,6 @@ def log_step(step, action_str, reward, done, error=None):
 
 def log_end(success, steps, score, rewards):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    # Exact format from official sample — no task= field
     print(
         f"[END] success={str(success).lower()} steps={steps} "
         f"score={score:.3f} rewards={rewards_str}",
@@ -64,11 +68,14 @@ def log_end(success, steps, score, rewards):
     )
 
 def safe_parse(text):
-    if not text: return None
+    if not text:
+        return None
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
-        try: return json.loads(match.group())
-        except: pass
+        try:
+            return json.loads(match.group())
+        except:
+            pass
     return None
 
 def fallback_policy(state):
@@ -89,16 +96,22 @@ def run():
 
     log_start("customer_support_triage", "openenv", MODEL_NAME)
     print(f"[DEBUG] API_BASE_URL={API_BASE_URL}", flush=True)
-    print(f"[DEBUG] API_KEY=SET model={MODEL_NAME}", flush=True)
+    print(f"[DEBUG] MODEL_NAME={MODEL_NAME}", flush=True)
 
     try:
         env = CustomerSupportEnv()
         state = env.reset()
-        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY, timeout=20.0)
+
+        client = OpenAI(
+            base_url=API_BASE_URL,
+            api_key=API_KEY,
+            timeout=20.0,
+        )
 
         done = False
         for step in range(1, MAX_STEPS + 1):
-            if done: break
+            if done:
+                break
 
             prompt = (
                 f"You are a customer support triage agent.\n"
@@ -125,7 +138,8 @@ def run():
 
             if not action:
                 action = fallback_policy(state)
-                if not error: error = "parse_failed"
+                if not error:
+                    error = "parse_failed"
 
             step_result = env.step(action)
             state  = step_result[0]
