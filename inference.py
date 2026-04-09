@@ -56,9 +56,9 @@ def run():
     
     # Read env vars INSIDE run() exactly as validator instructions say
     api_base_url = os.environ["API_BASE_URL"]
-    api_key      = os.environ.get("OPENAI_API_KEY") or os.environ.get("API_KEY")
+    api_key      = os.environ["HF_TOKEN"]        # ← HF_TOKEN, not API_KEY
     model_name   = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-    
+
     client = OpenAI(
         base_url=api_base_url,
         api_key=api_key,
