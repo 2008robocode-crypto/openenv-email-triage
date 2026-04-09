@@ -4,7 +4,9 @@ import json
 import re
 import traceback
 
-# 🔥 CRITICAL: REMOVE PROXY ENV (fix OpenAI/httpx crash)
+# =========================
+# 🔥 FIX 1: REMOVE PROXY (CRITICAL)
+# =========================
 for k in [
     "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
     "http_proxy", "https_proxy", "all_proxy"
@@ -16,9 +18,21 @@ from core import CustomerSupportEnv
 
 
 # =========================
-# ENV (SAFE)
+# 🔥 FIX 2: NORMALIZE BASE URL
 # =========================
-API_BASE_URL = os.environ.get("API_BASE_URL")
+def normalize_base_url(url):
+    if not url:
+        return None
+    url = url.strip()
+    if not url.startswith("http"):
+        url = "https://" + url
+    return url.rstrip("/")
+
+
+# =========================
+# ENV
+# =========================
+API_BASE_URL = normalize_base_url(os.environ.get("API_BASE_URL"))
 API_KEY = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN")
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
@@ -26,10 +40,11 @@ MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
 
 # =========================
-# LOGGING (STRICT FORMAT)
+# LOGGING (STRICT)
 # =========================
 def log_start(task, env_name, model):
     print(f"[START] task={task} env={env_name} model={model}", flush=True)
+
 
 def log_step(step, action_str, reward, done, error=None):
     print(
@@ -38,6 +53,7 @@ def log_step(step, action_str, reward, done, error=None):
         f"error={error if error else 'null'}",
         flush=True
     )
+
 
 def log_end(success, steps, score, rewards):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
@@ -64,7 +80,7 @@ def safe_parse(text):
 
 
 # =========================
-# FALLBACK POLICY
+# FALLBACK
 # =========================
 def fallback_policy(state):
     inbox = state.get("inbox", [])
@@ -107,7 +123,7 @@ def run():
     success = False
     steps_taken = 0
     rewards = []
-    score = 0.0
+    score = MIN_VAL
 
     log_start("customer_support_triage", "openenv", MODEL_NAME)
 
@@ -117,7 +133,7 @@ def run():
 
         client = get_client()
 
-        # 🔥 FORCE PROXY CALL (IMPORTANT FOR VALIDATOR)
+        # 🔥 FORCE PROXY CALL (IMPORTANT)
         if client:
             try:
                 client.chat.completions.create(
