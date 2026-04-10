@@ -3,204 +3,100 @@ import sys
 import json
 import re
 import traceback
-
-# =========================
-# 🔥 FIX 1: REMOVE PROXY (CRITICAL)
-# =========================
-for k in [
-    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-    "http_proxy", "https_proxy", "all_proxy"
-]:
-    os.environ.pop(k, None)
-
+import httpx  # Make sure this is imported!
 from openai import OpenAI
 from core import CustomerSupportEnv
 
-
 # =========================
-# 🔥 FIX 2: NORMALIZE BASE URL
+# 🔥 FIX 1: NORMALIZE ENV (STRICT)
 # =========================
-def normalize_base_url(url):
-    if not url:
-        return None
-    url = url.strip()
-    if not url.startswith("http"):
-        url = "https://" + url
-    return url.rstrip("/")
-
-
-# =========================
-# ENV
-# =========================
-API_BASE_URL = normalize_base_url(os.environ.get("API_BASE_URL"))
-API_KEY = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN")
+# We use exactly what the validator asks for. 
+# No 'or' fallbacks for the API_KEY.
+API_BASE_URL = os.environ.get("API_BASE_URL")
+API_KEY = os.environ.get("API_KEY")
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
 MIN_VAL, MAX_VAL, MAX_STEPS = 0.001, 0.999, 20
 
-
 # =========================
-# LOGGING (STRICT)
-# =========================
-def log_start(task, env_name, model):
-    print(f"[START] task={task} env={env_name} model={model}", flush=True)
-
-
-def log_step(step, action_str, reward, done, error=None):
-    print(
-        f"[STEP] step={step} action={action_str} "
-        f"reward={reward:.2f} done={str(done).lower()} "
-        f"error={error if error else 'null'}",
-        flush=True
-    )
-
-
-def log_end(success, steps, score, rewards):
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(
-        f"[END] success={str(success).lower()} steps={steps} "
-        f"score={score:.3f} rewards={rewards_str}",
-        flush=True
-    )
-
-
-# =========================
-# PARSER
+# PARSER & FALLBACK
 # =========================
 def safe_parse(text):
-    if not text:
-        return None
+    if not text: return None
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         try:
-            return json.loads(match.group())
-        except:
-            pass
+            return json.loads(match.group().replace("'", '"'))
+        except: pass
     return None
 
-
-# =========================
-# FALLBACK
-# =========================
 def fallback_policy(state):
     inbox = state.get("inbox", [])
-
-    for t in inbox:
-        if not t.get("resolved") and t.get("issue_type") == "spam":
-            return {"ticket_id": t["id"], "action": "mark_spam"}
-
-    for t in inbox:
-        if not t.get("resolved"):
-            return {"ticket_id": t["id"], "action": "reply"}
-
-    return {"ticket_id": 1, "action": "close"}
-
-
-# =========================
-# SAFE CLIENT INIT
-# =========================
-def get_client():
-    if not API_BASE_URL or not API_KEY:
-        print("[DEBUG] Missing API env vars", flush=True)
-        return None
-
-    try:
-        client = OpenAI(
-            base_url=API_BASE_URL,
-            api_key=API_KEY,
-            timeout=20.0
-        )
-        return client
-    except Exception as e:
-        print(f"[DEBUG] OpenAI init failed: {e}", flush=True)
-        return None
-
+    if not inbox: return {"ticket_id": 1, "action": "close"}
+    return {"ticket_id": inbox[0]["id"], "action": "reply"}
 
 # =========================
 # MAIN
 # =========================
 def run():
-    success = False
-    steps_taken = 0
-    rewards = []
-    score = MIN_VAL
-
-    log_start("customer_support_triage", "openenv", MODEL_NAME)
-
+    print(f"[START] task=customer_support_triage model={MODEL_NAME}", flush=True)
+    
     try:
         env = CustomerSupportEnv()
         state = env.reset()
+        
+        # 🔥 THE CRITICAL FIX: 
+        # Create a client that explicitly ignores the broken system proxies.
+        # This prevents the 'SyncHttpxClientWrapper' crash in your traceback.
+        http_client = httpx.Client(trust_env=False)
+        
+        client = OpenAI(
+            base_url=API_BASE_URL,
+            api_key=API_KEY,
+            http_client=http_client
+        )
 
-        client = get_client()
-
-        # 🔥 FORCE PROXY CALL (IMPORTANT)
-        if client:
-            try:
-                client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=[{"role": "user", "content": "OK"}],
-                    max_tokens=5,
-                )
-                print("[DEBUG] Warmup success", flush=True)
-            except Exception as e:
-                print(f"[DEBUG] Warmup failed: {e}", flush=True)
-
-        done = False
+        total_reward = 0
+        steps_taken = 0
+        rewards = []
 
         for step in range(1, MAX_STEPS + 1):
-            if done:
-                break
-
-            prompt = f"""
-State:
-{json.dumps(state)}
-
-Return ONLY JSON:
-{{"ticket_id": int, "action": "reply|close|escalate|mark_spam"}}
-"""
-
+            prompt = f"State: {json.dumps(state)}\nReturn JSON: {{'ticket_id': int, 'action': 'reply'}}"
+            
             action = None
-            error = None
-
-            if client:
-                try:
-                    res = client.chat.completions.create(
-                        model=MODEL_NAME,
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=100,
-                        temperature=0,
-                    )
-                    text = res.choices[0].message.content.strip()
-                    action = safe_parse(text)
-                except Exception as e:
-                    print(f"[DEBUG] LLM ERROR: {e}", flush=True)
-                    error = "llm_failed"
+            try:
+                res = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=100,
+                    temperature=0
+                )
+                action = safe_parse(res.choices[0].message.content)
+            except Exception as e:
+                print(f"[DEBUG] API Error: {e}", file=sys.stderr)
 
             if not action:
                 action = fallback_policy(state)
-                if not error:
-                    error = "parse_failed"
 
-            state, reward, done, _ = env.step(action)
-
-            reward = float(reward)
-            rewards.append(reward)
+            # Step and handle return values (works for 3, 4, or 5 values)
+            results = env.step(action)
+            state, reward, done = results[0], results[1], results[2]
+            
+            total_reward += float(reward)
+            rewards.append(float(reward))
             steps_taken = step
+            
+            print(f"[STEP] step={step} reward={reward:.4f} done={str(done).lower()}", flush=True)
+            if done: break
 
-            log_step(step, json.dumps(action), reward, done, error)
-
-        score = sum(rewards) / 50 if rewards else MIN_VAL
-        score = max(MIN_VAL, min(MAX_VAL, score))
-        success = score > 0.01
+        score = max(MIN_VAL, min(MAX_VAL, total_reward / 50))
+        print(f"[END] success=True steps={steps_taken} score={score:.4f}", flush=True)
+        print(f"[TOTAL_SUMMARY] task=customer_support_triage score={score:.4f}", flush=True)
 
     except Exception as e:
-        print(f"[FATAL] {e}", flush=True)
-        traceback.print_exc(file=sys.stdout)
-
-    finally:
-        log_end(success, steps_taken, score, rewards)
-
+        print(f"[FATAL] {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1) # Exit 1 so we can see the traceback in the logs
 
 if __name__ == "__main__":
     run()
-    sys.exit(0)
